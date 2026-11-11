@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import tempfile
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -31,8 +32,14 @@ def _request(url: str, accept: str = "application/vnd.github+json"):
 def release_assets(tag: str = "latest") -> tuple[str, dict]:
     """(tag, {asset name: API url}) of a release."""
     path = "latest" if tag == "latest" else "tags/" + tag
-    with _request(API % (REPO, path)) as r:
-        rel = json.load(r)
+    try:
+        with _request(API % (REPO, path)) as r:
+            rel = json.load(r)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise RuntimeError(f"no release {tag!r} found in {REPO} (or the repository is not public yet; set "
+                               "GITHUB_TOKEN to a token with read access)") from None
+        raise
     return rel["tag_name"], {a["name"]: a["url"] for a in rel.get("assets", [])}
 
 
