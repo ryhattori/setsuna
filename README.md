@@ -3,9 +3,9 @@
 **Spike Estimation with Temporal Super-resolution, Universal across Neuron types and Acquisition settings.**
 
 SETSUNA infers spikes from two-photon calcium imaging on a time grid 512 times finer than the imaging frame. One network
-design, conditioned on frame rate, noise level, indicator and cell type, covers seven calcium indicators (jGCaMP8s/m/f,
-jGCaMP7f, GCaMP6s/f, jRGECO1a), frame rates from 1 to 120 Hz, cortical pyramidal neurons and interneurons and spinal-cord
-neurons, and runs on indicators and cell types without ground truth.
+design, conditioned on frame rate, noise level, indicator and cell type, serves frame rates from 1 to 120 Hz and the noise
+levels of real experiments, and generalizes across indicators and cell types, including those for which no simultaneous
+electrophysiology was available in training.
 
 ```python
 import setsuna

@@ -1,8 +1,9 @@
 # SETSUNA user guide
 
 SETSUNA infers spikes from calcium-imaging traces on a time grid 512 times finer than the imaging frame. One network
-design covers seven calcium indicators, frame rates from 1 to 120 Hz and the noise levels of real experiments; it is
-told the frame rate, the noise level, the indicator and the cell type of each recording, and returns
+design serves frame rates from 1 to 120 Hz and the noise levels of real experiments, and generalizes across indicators and
+cell types, including those without ground truth in training; it is told the frame rate, the noise level, the indicator
+and the cell type of each recording, and returns
 
 * a **rate**: the expected number of spikes in every frame (or in every 1/512 of a frame), and
 * **spike times**, decoded at the timing precision your analysis needs.
