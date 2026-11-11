@@ -7,6 +7,12 @@ design, conditioned on frame rate, noise level, indicator and cell type, serves 
 levels of real experiments, and generalizes across indicators and cell types, including those for which no simultaneous
 electrophysiology was available in training.
 
+![SETSUNA network](docs/img/network.png)
+
+The trace is conditioned additively on frame rate, noise level, indicator and cell type and processed by two conformer
+branches mixed by a gate; a count head and a within-frame head return 512 sub-bins per frame, from which the rate and
+spike times at the analysis's timing tolerance are decoded.
+
 ```python
 import setsuna
 dff = setsuna.dff_from_fluorescence(F, Fneu, fps=30.0)          # raw + neuropil fluorescence -> fractional dF/F
@@ -23,9 +29,10 @@ setsuna run --npz traces.npz --fps 30 --indicator jGCaMP8s --tolerance-ms 10 --o
 
     pip install git+https://github.com/ryhattori/setsuna.git
 
-Requires Python >= 3.10 and PyTorch >= 2.2 (with CUDA for GPU inference). The trained models are distributed
-separately: download them into `~/.setsuna/models` or set `SETSUNA_MODEL_DIR` (model download: to be added with the
-release).
+Requires Python >= 3.10 and PyTorch >= 2.2; install PyTorch with CUDA first for GPU inference (see the user guide).
+Then install the trained models, which are published with each release of this repository:
+
+    setsuna download-models
 
 ## Documentation
 

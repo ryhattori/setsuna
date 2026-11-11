@@ -10,17 +10,43 @@ and the cell type of each recording, and returns
 
 ## 1. Install
 
+SETSUNA needs Python 3.10 or later, PyTorch 2.2 or later, NumPy, SciPy and Numba. It runs on an NVIDIA GPU or, much
+more slowly, on the CPU.
+
+**GPU setup (recommended).**
+
+1. Install a recent NVIDIA driver (`nvidia-smi` should list your GPU).
+2. In a fresh environment, install PyTorch built for CUDA before SETSUNA. The CUDA runtime comes with PyTorch; no
+   separate CUDA toolkit is needed. For current GPUs, including the RTX 50 series, use the CUDA 12.8 build:
+
+       conda create -n setsuna python=3.11
+       conda activate setsuna
+       pip install torch --index-url https://download.pytorch.org/whl/cu128
+
+   (pytorch.org lists the command for other CUDA versions; the RTX 50 series needs CUDA 12.8 or later.)
+3. Check that PyTorch sees the GPU:
+
+       python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+
+Then install SETSUNA:
+
     pip install git+https://github.com/ryhattori/setsuna.git
 
-SETSUNA needs Python 3.10 or later, PyTorch 2.2 or later, NumPy, SciPy and Numba. Install PyTorch with CUDA support
-first (see pytorch.org) to run on an NVIDIA GPU; SETSUNA also runs on the CPU, more slowly.
+At the default batch size SETSUNA uses about 6-8 GB of GPU memory; pass `batch_windows=256` (or lower) to
+`setsuna.infer` on a smaller GPU. Without a GPU, `device="cpu"` runs the same models.
 
 ## 2. Get the models
 
-Download the model files (link in the README) and unpack them into `~/.setsuna/models`, or anywhere else and point
-`SETSUNA_MODEL_DIR` at that folder. Check with
+The trained models are published with each release of this repository. Install them with
+
+    setsuna download-models
+
+which downloads the archive of the latest release, checks its checksum and unpacks it into `~/.setsuna/models`
+(`--model-dir` or `SETSUNA_MODEL_DIR` to put them elsewhere; `--tag` for a specific release). Check with
 
     setsuna models
+
+JupiterScope's model download installs the same release.
 
 ## 3. Prepare the input
 
@@ -117,9 +143,10 @@ number of decoded spikes, trading precision for recall.
 ## 8. Frame rates and speed
 
 Each indicator has three networks for overlapping frame-rate bands (about 1-10, 8-60 and 40-120 Hz; jRGECO1a to
-25 Hz); SETSUNA picks the one for your frame rate and averages three independently trained copies. On one recent NVIDIA
-GPU, an hour of recording from 10,000 neurons takes one to two minutes through the JupiterScope pipeline, which batches
-neurons; `setsuna.infer` processes one neuron at a time and is slower. Lower `batch_windows` if the GPU runs out of memory.
+25 Hz); SETSUNA picks the one for your frame rate and averages three independently trained copies. On a GPU,
+`setsuna.infer` pipelines the neurons (one neuron's network pass runs while the previous neuron is decoded): on one
+recent NVIDIA GPU an hour of recording from 10,000 neurons takes about a minute or two, and an hour of 3,000 mesoscope
+neurons at 10.7 Hz about 17 s. Lower `batch_windows` if the GPU runs out of memory.
 
 ## 9. Citing
 

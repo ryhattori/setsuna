@@ -97,9 +97,126 @@ class Session:
         return out
 
 
+def _infer_fast(sess, X, rows, tol, gain, rate, nu, spikes, progress=False):
+    """Every row of X through the session the way JupiterScope's session runner does it (the paper's speed
+    benchmark): on CUDA each row's forward is queued before the previous row is collected and decoded, the timing
+    decoder decodes groups of rows per launch on a worker thread, the detection decoder runs on worker threads, and the
+    per-row noise and z-score statistics are computed in blocks on a side thread. Same rates and spike times as
+    Session.infer_one, row for row."""
+    import os
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    E, S = sess._e, sess.s
+    fs, M, T = sess.fps, S.M, X.shape[1]
+    want = tol is not None
+    decoder, width = E._route.decoder_for(float(tol), fs) if want else (None, None)
+    evc = want and decoder == "detection" and E.evcount_fast_ok()
+    seg_bins = None
+    if want and not evc:
+        seg_bins = (E.timing_segment_bins(M, fs, n_frames=int(T), width_ms=width) if decoder == "timing"
+                    else E.timing_segment_bins(M, fs, 30.0))
+    pipelined = str(getattr(S.device, "type", "")) == "cuda"
+    use_stats = getattr(S, "use_prep_stats", None)
+    store = {} if (pipelined and use_stats is not None) else None
+    stop = threading.Event()
+    if use_stats is not None:
+        use_stats(store)
+    if store is not None:
+        def _stats(rows_=np.asarray(rows, np.int64)):
+            try:
+                step = int(max(1, min(256, (32 << 20) // max(1, 8 * int(T)))))
+                for a in range(0, rows_.size, step):
+                    if stop.is_set():
+                        return
+                    blk = rows_[a:a + step]
+                    for r, st in zip(blk, E.prep_stats_many(X[blk], fs)):
+                        if st is not None:
+                            store[int(r)] = st
+            except Exception:
+                pass
+        threading.Thread(target=_stats, name="setsuna_row_stats", daemon=True).start()
+
+    def collect(row, out):
+        E.finish_outputs(out)
+        rate[row] = out["rate"]; nu[row] = out["nu"]
+
+    def decode_st(out):
+        return E.decode_spike_times(out.get("lam"), out["prob"], M, fs, tol_ms=float(tol), count_gain=float(gain),
+                                    lam_frame=out.get("lam_frame"), p_frame=out.get("p_frame"),
+                                    ready_event=out.get("done_event"), lam_part=out.get("lam_part"),
+                                    prob_cmax=out.get("prob_cmax"), cell_type=S.decode_cell_type)
+
+    pool, queue, qmax = None, [], 0
+    if pipelined and evc:
+        n_thr = int(os.environ.get("SETSUNA_DECODE_THREADS", "3"))
+        if n_thr > 1:
+            pool, qmax = ThreadPoolExecutor(n_thr, thread_name_prefix="setsuna_decode"), 2 * n_thr
+    batch = pipelined and want and not evc and decoder == "timing" and E.decode_batch_ok(S.device)
+    dk = 1
+    if batch:
+        mb = float(os.environ.get("SETSUNA_DECODE_BATCH_MB", "768"))
+        dk = int(max(1, min(16, (mb * 2 ** 20) // max(1, int(T) * int(M) * 4))))
+        if dk > 1:
+            pool, qmax = ThreadPoolExecutor(1, thread_name_prefix="setsuna_timing"), 1
+
+    def drain(limit):
+        while queue and (len(queue) > limit or queue[0][1].done()):
+            rr, fut = queue.pop(0)
+            for r, st in zip(rr, fut.result()):
+                spikes[r] = np.asarray(st, np.float64)
+
+    def flush(group):
+        for row, out in group:
+            collect(row, out)
+        if not want:
+            return
+        if dk > 1 and len(group) > 1:
+            items = [dict(lam=o.get("lam"), prob=o["prob"], lam_frame=o.get("lam_frame"), lam_part=o.get("lam_part"),
+                          prob_cmax=o.get("prob_cmax"), ready_event=o.get("done_event")) for _r, o in group]
+            if pool is not None:
+                queue.append(([r for r, _o in group], pool.submit(E.decode_timing_many, items, M, fs, width,
+                                                                  count_gain=float(gain))))
+                drain(qmax)
+            else:
+                for (r, _o), st in zip(group, E.decode_timing_many(items, M, fs, width, count_gain=float(gain))):
+                    spikes[r] = np.asarray(st, np.float64)
+        elif pool is not None:
+            for r, o in group:
+                queue.append(([r], pool.submit(lambda o=o: [decode_st(o)])))
+            drain(qmax)
+        else:
+            for r, o in group:
+                spikes[r] = np.asarray(decode_st(o), np.float64)
+
+    pending = []
+    try:
+        for k, row in enumerate(rows):
+            nxt = (int(rows[k + 1]), X[rows[k + 1]]) if k + 1 < len(rows) else None
+            out = S.infer_roi_outputs(X[row], pool_k=None, need_full=want and not evc, full_device=True, key=int(row),
+                                      prefetch=nxt, fine_prob=evc, defer_copy=pipelined, seg_bins=seg_bins)
+            if pipelined:
+                pending.append((int(row), out))
+                if len(pending) >= 2 * dk:
+                    flush(pending[:dk]); del pending[:dk]
+            else:
+                flush([(int(row), out)])
+            if progress and (k + 1) % 1000 == 0:
+                print(f"  {k + 1}/{len(rows)} neurons", flush=True)
+        while pending:
+            flush(pending[:dk]); del pending[:dk]
+        if pool is not None:
+            drain(0)
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True)
+        stop.set()
+        if use_stats is not None:
+            use_stats(None)
+
+
 def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyramidal", tolerance_ms: float | None = 10.0,
           count_gain: float = 1.0, model_dir: str | Path | None = None, device: str = "auto", fine: bool = False,
-          progress: bool = False) -> dict:
+          progress: bool = False, batch_windows: int = 512) -> dict:
     """Infer spikes for every neuron of ``dff`` (n_neurons x n_frames, fractional dF/F at ``fps`` Hz).
 
     ``tolerance_ms`` is the spike-timing precision your analysis needs; it picks the decoder and its smoothing width
@@ -107,12 +224,19 @@ def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyrami
     ``count_gain`` scales the number of decoded spikes (1 = the count head's estimate).
     Returns ``rate`` (n_neurons x n_frames, expected spikes per frame; multiply by fps for spikes/s), ``nu`` (noise level
     per neuron), ``spike_times`` (list of arrays, seconds from the first frame) and, with ``fine``, the 512-bin streams.
-    Rows that are all NaN are returned as NaN with no spikes."""
+    Rows that are all NaN are returned as NaN with no spikes.
+    On a CUDA GPU the neurons are pipelined (one neuron's forward pass runs while the previous one is decoded); lower
+    ``batch_windows`` if the GPU runs out of memory. ``fine=True`` processes one neuron at a time and is slower."""
     X = np.atleast_2d(np.asarray(dff, np.float32))
-    sess = Session(fps, indicator, cell_type, model_dir=model_dir, device=device)
+    sess = Session(fps, indicator, cell_type, model_dir=model_dir, device=device, batch_windows=batch_windows)
     n, T = X.shape
     rate = np.full((n, T), np.nan, np.float32); nu = np.full(n, np.nan); spikes = [np.zeros(0) for _ in range(n)]
     count, prob = ([None] * n, [None] * n) if fine else (None, None)
+    if not fine:
+        ok = np.isfinite(X).any(1)
+        X = np.where(np.isfinite(X), X, 0.0).astype(np.float32)
+        _infer_fast(sess, X, np.flatnonzero(ok), tolerance_ms, count_gain, rate, nu, spikes, progress)
+        n = 0   # every row done
     for i in range(n):
         row = X[i]
         if not np.isfinite(row).any():

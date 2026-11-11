@@ -5,7 +5,8 @@ Input (n_neurons x n_frames), one of
   --F FILE [--Fneu FILE]  raw and neuropil fluorescence (.npy, .csv); dF/F is computed as in setsuna.dff_from_fluorescence
   --npz FILE            .npz with keys 'F' and optionally 'Fneu' (e.g. converted from Suite2p's F.npy and Fneu.npy)
 Output (.npz): rate (n_neurons x n_frames, expected spikes per frame), nu, and the spike times both as
-spike_neuron / spike_time (flat arrays) and per neuron. `setsuna models` lists the installed checkpoints.
+spike_neuron / spike_time (flat arrays). `setsuna download-models` installs the trained models from the GitHub
+release; `setsuna models` lists the installed checkpoints.
 """
 from __future__ import annotations
 
@@ -49,9 +50,16 @@ def main(argv=None) -> int:
     r.add_argument("--out", required=True)
     m = sub.add_parser("models", help="list installed checkpoints")
     m.add_argument("--model-dir", default=None)
+    dl = sub.add_parser("download-models", help="download the trained models from the GitHub release")
+    dl.add_argument("--model-dir", default=None)
+    dl.add_argument("--tag", default="latest", help="release tag (default: the latest release)")
     a = ap.parse_args(argv)
 
     import setsuna
+    if a.cmd == "download-models":
+        from setsuna import models
+        models.download(a.model_dir, a.tag)
+        return 0
     if a.cmd == "models":
         from setsuna import engine
         d = Path(a.model_dir) if a.model_dir else engine.default_model_dir()

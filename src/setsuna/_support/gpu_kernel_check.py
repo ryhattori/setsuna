@@ -375,7 +375,7 @@ PIPELINES = {
     "xsession": "jupiterscope.registration.gpu_checks:prewarm_cross_session",
     "seg": "jupiterscope.segmentation.gpu_checks:prewarm",
     "extract": "jupiterscope.pipeline.extract_gpu_checks:prewarm",
-    "setsuna": "jupiterscope.spike_inference.gpu_checks:prewarm",
+    "setsuna": "setsuna.gpu_checks:prewarm",
 }
 
 

@@ -47,7 +47,7 @@ _SYNTH: dict = {}
 
 
 def _S():
-    from . import setsuna
+    from . import engine as setsuna
     return setsuna
 
 
