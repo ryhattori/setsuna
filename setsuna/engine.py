@@ -116,16 +116,16 @@ NU_K = 0.6745 * math.sqrt(2.0) * 100.0   # nu = NU_K * sigma / sqrt(fps)  (train
 
 PV_FILE_FMT = "bsr_INabSYM24C167FIN_allin_{ind}_{band}_f0_s{seed}.pt"
 PV_FLAVORS = ("GCaMP6f", "GCaMP8s")   # filename slots = ACQUISITION REGIMES, not specialisations
-PV_GEN_FILE_FMT = "bsr_INabSYM24C167GTU_allin_ALL_{band}_f0_s{seed}.pt"
-SP_FILE_FMT = "bsr_SPabC167_pooled_s1sp_GCaMP6s_{band}_fD_s{seed}.pt"
-ALLCT_FILE_FMT = "bsr_INabALLCTSYM24C167_{ind}_{band}_s{seed}.pt"
+PV_GEN_FILE_FMT = "bsr_INabSYM24C168GTU_allin_ALL_{band}_f0_s{seed}.pt"
+SP_FILE_FMT = "bsr_SPabC168_pooled_s1sp_GCaMP6s_{band}_fD_s{seed}.pt"
+ALLCT_FILE_FMT = "bsr_INabALLCTSYM24C168_{ind}_{band}_s{seed}.pt"
 ALLCT_INDICATORS = ("GCaMP6f", "GCaMP8s", "GCaMP6s")   # + "ALL" for 'Other' (or model_set 'generalist')
 
 # Pyramidal / generalist band grids are NOT a constant: they differ per indicator (6s MID is
 # 3-35 Hz, 7f MID 8-60 Hz) and are read from each checkpoint's own saved args at routing time
 # (band_grids). The provenance string reports the grid of the band actually selected.
 SPEC_FILE_FMT = "bsr_FOftDEPLOYSYM24C167_{ind}_{band}_s{seed}.pt"
-GEN_FILE_FMT = "bsr_GTUftDEPLOYSYM24C167_ALL_{band}_s{seed}.pt"
+GEN_FILE_FMT = "bsr_GTUftDEPLOYSYM24C168_ALL_{band}_s{seed}.pt"
 
 
 #: Environment variable naming a folder that holds the SETSUNA checkpoints (it wins when set).
@@ -174,24 +174,31 @@ def models_installed(model_dir: Path) -> bool:
     return all((Path(model_dir) / name).is_file() for name in required_model_names())
 
 
-#: Every family's file name format, each with this release's edition tag (EDITION_TAG).
+#: Every family's file name format. Each carries the edition of the training run that produced it: the families
+#: retrained for this release are C168 (no indicator or cell-type dropout; an unseen identity is an appended zero
+#: row), the pyramidal specialists and the interneuron models with ground truth are unchanged from C167.
 FILE_FMTS = (SPEC_FILE_FMT, GEN_FILE_FMT, PV_FILE_FMT, PV_GEN_FILE_FMT, SP_FILE_FMT, ALLCT_FILE_FMT)
-EDITION_TAG = re.search(r"C\d{3}(?!\d)", GEN_FILE_FMT).group(0)          # "C167"
+
+
+def _edition(fmt: str) -> str:
+    return re.search(r"C\d{3}(?!\d)", fmt).group(0)
+
+
+EDITION_TAG = max((_edition(f) for f in FILE_FMTS), key=lambda t: int(t[1:]))   # the release edition: "C168"
 
 
 def _earlier_edition_pattern(fmt: str) -> "re.Pattern":
-    """A family's file name with any edition in place of this one's (group 1: its number)."""
+    """A family's file name with any edition in place of its own (group 1: that edition's number)."""
     parts = re.split(r"\{\w+\}", fmt)
-    body = r"[A-Za-z0-9]+".join(re.escape(p).replace(EDITION_TAG, r"C(\d{3})") for p in parts)
+    body = r"[A-Za-z0-9]+".join(re.escape(p).replace(_edition(fmt), r"C(\d{3})") for p in parts)
     return re.compile(body)
 
 
 def previous_release_files(model_dir) -> list:
     """The checkpoints in ``model_dir`` that an earlier release installed: a current family's file name with an
-    earlier edition (bsr_GTUftDEPLOYSYM24C166_ALL_MID_s1.pt beside the C167 one), which this JupiterScope never
+    earlier edition (bsr_GTUftDEPLOYSYM24C167_ALL_MID_s1.pt beside the C168 one), which this JupiterScope never
     loads. Anything else -- a fine-tuned or other checkpoint, a family no longer shipped -- is not one."""
-    current = int(EDITION_TAG[1:])
-    patterns = [_earlier_edition_pattern(fmt) for fmt in FILE_FMTS]
+    patterns = [(_earlier_edition_pattern(fmt), int(_edition(fmt)[1:])) for fmt in FILE_FMTS]
     folder = Path(model_dir)
     if not folder.is_dir():
         return []
@@ -199,7 +206,7 @@ def previous_release_files(model_dir) -> list:
     for path in sorted(folder.iterdir()):
         if not path.is_file():
             continue
-        for pattern in patterns:
+        for pattern, current in patterns:
             match = pattern.fullmatch(path.name)
             if match and int(match.group(1)) < current:
                 out.append(path)
