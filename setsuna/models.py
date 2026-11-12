@@ -23,8 +23,8 @@ API = "https://api.github.com/repos/%s/releases/%s"
 #: The models this version of the package was built and tested with: the archive attached to GitHub release
 #: MODEL_RELEASE, verified against MODEL_SHA256 (a download that does not match is refused).
 MODEL_RELEASE = "v1.0.0"
-MODEL_ARCHIVE = "setsuna_models_c168.zip"
-MODEL_SHA256 = "b42d6fcad6ccdad589a3692ffab3251e59db3a631d3ae4fc72886b10f551291b"
+MODEL_ARCHIVE = "setsuna_models_C168.zip"
+MODEL_SHA256 = "8baaf0d08ddf62ce10e18ca993c8e41f3a3c83bc401f4805edca40b6ec2ee2f5"
 #: Set to 1 to turn off the download on first use (offline machines; install with `setsuna download-models`).
 NO_DOWNLOAD_ENV = "SETSUNA_NO_DOWNLOAD"
 
@@ -63,7 +63,7 @@ def ensure_models(quiet: bool = False) -> Path:
         raise FileNotFoundError("SETSUNA's models are not installed and %s is set; install them with "
                                 "`setsuna download-models` (release %s)" % (NO_DOWNLOAD_ENV, MODEL_RELEASE))
     if not quiet:
-        print("SETSUNA's models are not installed: downloading release %s (%s, about 53 MB) ..." % (MODEL_RELEASE, MODEL_ARCHIVE),
+        print("SETSUNA's models are not installed: downloading release %s (%s, about 64 MB) ..." % (MODEL_RELEASE, MODEL_ARCHIVE),
               flush=True)
     return download(quiet=quiet)
 
@@ -124,9 +124,17 @@ def download(model_dir: str | Path | None = None, tag: str | None = None, quiet:
             if h.hexdigest() != want:
                 raise RuntimeError(f"checksum mismatch for {name}: the download is incomplete or corrupted")
         with zipfile.ZipFile(zpath) as z:
-            for m in z.namelist():
-                if m.endswith("/"):
-                    continue
+            sums = {}
+            if "SHA256SUMS.txt" in z.namelist():       # every checkpoint is checked before any is written
+                for line in z.read("SHA256SUMS.txt").decode().splitlines():
+                    parts = line.split()
+                    if len(parts) == 2:
+                        sums[parts[1]] = parts[0].lower()
+            members = [m for m in z.namelist() if m.endswith(".pt")]
+            for m in members:
+                if m in sums and hashlib.sha256(z.read(m)).hexdigest() != sums[m]:
+                    raise RuntimeError(f"checksum mismatch for {m} inside {name}")
+            for m in members:
                 target = dst / Path(m).name          # flat: every checkpoint in the model folder itself
                 with z.open(m) as src, open(target, "wb") as out:
                     shutil.copyfileobj(src, out)

@@ -38,7 +38,7 @@ At the default batch size SETSUNA uses about 6-8 GB of GPU memory; pass `batch_w
 ## 2. Get the models
 
 The trained models are published as an archive of a release of this repository (release v1.0.0 for version 1.0.0 of
-the package, about 53 MB). They are downloaded automatically the first time you run SETSUNA. To install them
+the package, about 64 MB). They are downloaded automatically the first time you run SETSUNA. To install them
 beforehand, for example on a cluster node without internet access, run
 
     setsuna download-models
