@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import os
+
 import numpy as np
 
 __all__ = ["dff_from_fluorescence", "infer", "Session", "INDICATORS", "CELL_TYPES"]
@@ -79,6 +81,9 @@ class Session:
         if cell_type not in CELL_TYPES:
             raise ValueError(f"cell_type {cell_type!r}: use one of {CELL_TYPES}")
         self._e = engine
+        if model_dir is None and not os.environ.get(engine.MODEL_DIR_ENV, "").strip():
+            from . import models
+            model_dir = models.ensure_models()          # downloads this version's models on first use
         self.fps = float(fps)
         self.s = engine.SetsunaSession(self.fps, indicator=INDICATORS.get(indicator, indicator), cell_type=cell_type,
                                        model_dir=model_dir, device=device, batch_windows=batch_windows)

@@ -30,7 +30,8 @@ setsuna run --npz traces.npz --fps 30 --indicator jGCaMP8s --tolerance-ms 10 --o
     pip install git+https://github.com/ryhattori/setsuna.git
 
 Requires Python >= 3.10 and PyTorch >= 2.2; install PyTorch with CUDA first for GPU inference (see the user guide).
-Then install the trained models, which are published with each release of this repository:
+The trained models (release v1.0.0, about 53 MB) are downloaded the first time you run SETSUNA; to install them
+beforehand, run
 
     setsuna download-models
 

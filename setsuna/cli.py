@@ -52,7 +52,7 @@ def main(argv=None) -> int:
     m.add_argument("--model-dir", default=None)
     dl = sub.add_parser("download-models", help="download the trained models from the GitHub release")
     dl.add_argument("--model-dir", default=None)
-    dl.add_argument("--tag", default="latest", help="release tag (default: the latest release)")
+    dl.add_argument("--tag", default=None, help="release tag (default: the models of this version, setsuna.models.MODEL_RELEASE)")
     a = ap.parse_args(argv)
 
     import setsuna

@@ -8,5 +8,5 @@ See docs/USER_GUIDE.md.
 """
 from .api import CELL_TYPES, INDICATORS, Session, dff_from_fluorescence, infer
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 __all__ = ["dff_from_fluorescence", "infer", "Session", "INDICATORS", "CELL_TYPES", "__version__"]
