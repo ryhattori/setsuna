@@ -1,4 +1,4 @@
-"""Build the model archive of a release: setsuna_models_<edition>.zip and its SHA-256 file.
+"""Build the model archive of a release: setsuna_models_v<version>.zip and its SHA-256 file.
 
     python tools/package_models.py <folder with the checkpoints> <output folder>
 
@@ -28,7 +28,8 @@ def main():
     if missing:
         sys.exit("missing %d checkpoint(s), e.g. %s" % (len(missing), ", ".join(missing[:5])))
     out.mkdir(parents=True, exist_ok=True)
-    zpath = out / ("setsuna_models_%s.zip" % E.EDITION_TAG)
+    from setsuna import __version__
+    zpath = out / ("setsuna_models_v%s.zip" % __version__)
     sums = []
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_STORED) as z:
         for n in names:
