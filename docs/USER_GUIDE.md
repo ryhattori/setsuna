@@ -185,9 +185,11 @@ number of decoded spikes, trading precision for recall.
 * **Spike times** are measured from the time stamp of the first frame. A scanning microscope reaches each neuron later
   than the frame's time stamp; for timing below a few milliseconds, add each neuron's scan-line delay (the time from the
   start of the frame to the line through the neuron) to its spike times.
-* **Within-frame timing has limits.** It needs enough signal in each frame. At the lowest signal-to-noise ratios and at
-  1 Hz, placement within the frame can fall to chance, and isolated spikes at the lowest frame rates are too rare to be
-  placed reliably. Detection and rates remain informative there.
+* **Within-frame timing has limits.** It needs enough signal in each frame. Against held-out electrophysiology, placement
+  within the frame beat chance for every indicator from 2 to 30 Hz and for six of seven at 1 Hz (not jGCaMP7f), and at
+  every frame rate at the four cleanest of eight noise levels; at the noisiest levels it can fall to chance. Isolated
+  single spikes were placed better than chance down to 5-25 Hz, depending on the indicator (not resolved for
+  jRGECO1a). Detection and rates remain informative where within-frame placement is not.
 * `fine=True` returns the full 512-bin count and within-frame streams for each neuron; `bins_per_frame` returns them
   pooled (section 5).
 
