@@ -30,14 +30,15 @@ setsuna run --npz traces.npz --fps 30 --indicator jGCaMP8s --tolerance-ms 10 --o
     pip install git+https://github.com/ryhattori/setsuna.git
 
 Requires Python >= 3.10 and PyTorch >= 2.2; install PyTorch with CUDA first for GPU inference (see the user guide).
-The trained models (release v1.0.0, about 64 MB) are downloaded the first time you run SETSUNA; to install them
+The trained models (release v0.9.0, about 64 MB) are downloaded the first time you run SETSUNA; to install them
 beforehand, run
 
     setsuna download-models
 
 ## Documentation
 
-[docs/USER_GUIDE.md](docs/USER_GUIDE.md): preparing input, choosing the indicator, cell type and timing tolerance, and
+[docs/USER_GUIDE.md](docs/USER_GUIDE.md): installing, a demo on a recording with electrophysiology (`examples/demo.py`),
+preparing input, choosing the indicator, cell type and timing tolerance, rates-only and sub-frame outputs, and
 reading the output.
 
 SETSUNA is also built into JupiterScope, which runs it from a GUI after registration, segmentation and fluorescence

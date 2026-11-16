@@ -22,8 +22,8 @@ API = "https://api.github.com/repos/%s/releases/%s"
 
 #: The models this version of the package was built and tested with: the archive attached to GitHub release
 #: MODEL_RELEASE, verified against MODEL_SHA256 (a download that does not match is refused).
-MODEL_RELEASE = "v1.0.0"
-MODEL_ARCHIVE = "setsuna_models_v1.0.0.zip"
+MODEL_RELEASE = "v0.9.0"
+MODEL_ARCHIVE = "setsuna_models_v0.9.0.zip"
 MODEL_SHA256 = "8baaf0d08ddf62ce10e18ca993c8e41f3a3c83bc401f4805edca40b6ec2ee2f5"
 #: Set to 1 to turn off the download on first use (offline machines; install with `setsuna download-models`).
 NO_DOWNLOAD_ENV = "SETSUNA_NO_DOWNLOAD"

@@ -254,6 +254,37 @@ def prep_stats_many(rows, fps: float) -> list:
     return [(float(nu[i]), float(m[i]), float(sd[i]) + 1e-6) if fin[i] else None for i in range(blk.shape[0])]
 
 
+#: Lowest noise level of the training ladder (first rung, nu) per indicator and frame rate. Traces cleaner than this
+#: were always brought up to it with added noise in training, so the models never saw a lower nu.
+NU_TRAIN_FLOOR = {
+    "GCaMP8f": {1: 26, 2: 19, 3: 16, 5: 12, 8: 9.5, 10: 8.5, 13: 7.5, 15: 7, 20: 6, 25: 5.5, 30: 5, 40: 4.5, 60: 3.5, 120: 2.5},
+    "GCaMP8m": {1: 20, 2: 14, 3: 12, 5: 9, 8: 7, 10: 6.5, 13: 5.5, 15: 5, 20: 4.5, 25: 4, 30: 3.5, 40: 3.5, 60: 2.5, 120: 2},
+    "GCaMP8s": {1: 21, 2: 15, 3: 12, 5: 9.5, 8: 7.5, 10: 6.5, 13: 6, 15: 5.5, 20: 5, 25: 4.5, 30: 4, 40: 3.5, 60: 3, 120: 2},
+    "GCaMP7f": {1: 50, 2: 34, 3: 28, 5: 22, 8: 17, 10: 16, 13: 14, 15: 13, 20: 11, 25: 10, 30: 9, 40: 8, 60: 6.5, 120: 4.5},
+    "GCaMP6f": {1: 7.5, 2: 5.5, 3: 4.5, 5: 3.5, 8: 3, 10: 2.5, 13: 2.5, 15: 2, 20: 2, 25: 1.5, 30: 1.5, 40: 1.5, 50: 1.5, 60: 1, 80: 1, 160: 1},
+    "GCaMP6s": {1: 10, 2: 7, 3: 6, 5: 4.5, 8: 3.5, 10: 3.5, 13: 3, 15: 2.5, 20: 2.5, 25: 2, 30: 2, 40: 2, 50: 1.5, 60: 1.5, 80: 1.5, 160: 1},
+    "jGECO1a": {1: 7.5, 2: 5.5, 3: 4.5, 5: 3.5, 8: 3, 10: 2.5, 15: 2, 30: 1.5},
+}
+#: The models are conditioned on max(nu, NU_GUARD_K * training floor). Far below the floor (dF/F much smaller than the
+#: training data's, e.g. from a different baseline convention) a model can read noise as spikes: counts several-fold
+#: too high and correlation near zero on single neurons. Measured on GENIE jGCaMP8 and Wei GCaMP6 recordings at 10 and
+#: 30 Hz: 0.25 removes those failures and leaves traces at the training data's scale unchanged; 0.5 starts to move
+#: normal traces. No noise is added; only the conditioning value is bounded.
+NU_GUARD_K = 0.25
+
+
+def nu_guard_floor(indicator: str, fps: float) -> float:
+    """NU_GUARD_K x the training floor for ``indicator`` at ``fps`` (log-log interpolation, clamped at the ends); for an
+    indicator outside the table ('other'), the lowest floor of any indicator."""
+    tabs = [NU_TRAIN_FLOOR[indicator]] if indicator in NU_TRAIN_FLOOR else list(NU_TRAIN_FLOOR.values())
+    lf = math.log(max(float(fps), 1e-3))
+    vals = []
+    for t in tabs:
+        f = np.log(np.array(sorted(t), np.float64)); v = np.log(np.array([t[k] for k in sorted(t)], np.float64))
+        vals.append(float(np.exp(np.interp(lf, f, v))))
+    return NU_GUARD_K * min(vals)
+
+
 def noise_level(dff: np.ndarray, fps: float) -> float:
     """Rupprecht 2021 standardized noise level in % * s^(-1/2).
 
@@ -4900,6 +4931,7 @@ class SetsunaSession:
                 _ENSEMBLE_CACHE[_key] = (self.models, self.cfg)
         self.M = int(self.cfg["M"])
         self.ind_id = OTHER_INDICATOR_ID if self.is_other else INDICATOR_TO_ID[indicator]
+        self.nu_min = nu_guard_floor("other" if self.is_other else indicator, self.fps)   # see NU_GUARD_K
         # 1/2/3 TRAINED in the allin set, 4/5 in the spinal set, 0-5 in the all-cell-types set ('other': row 7,
         # the C167 trained token, or an appended zero row on a 7-row file)
         self.ct_id = UNKNOWN_CELL_TYPE_ID if allct is not None else CELLTYPE_TO_ID[serve]
@@ -4933,8 +4965,8 @@ class SetsunaSession:
         st = given.pop(key, None) if (key is not None and given) else None
         if st is not None:
             nu, m, s = st
-            return nu, ((row - m) / s).astype(np.float32)
-        return noise_level(row, self.fps), standardize_dff(row)
+            return max(nu, self.nu_min), ((row - m) / s).astype(np.float32)
+        return max(noise_level(row, self.fps), self.nu_min), standardize_dff(row)
 
     def use_prep_stats(self, store=None) -> None:
         """Have _prep take a ROI's statistics from ``store`` (a dict key -> (nu, median, std + 1e-6) that the caller
@@ -4998,7 +5030,7 @@ class SetsunaSession:
         """fractional dF/F (1D) -> dict(rate, lam_fine, prob_fine, nu). NaN-safe rows
         must be filtered by the caller (mirrors the OASIS valid-rows convention)."""
         dff_row = np.asarray(dff_row, np.float32)
-        nu = noise_level(dff_row, self.fps)          # BEFORE standardizing, fractional units
+        nu = max(noise_level(dff_row, self.fps), self.nu_min)   # BEFORE standardizing, fractional units; guarded
         xz = standardize_dff(dff_row)
         lam, prob = predict_fine(self.models, self.cfg, xz, self.ind_id, self.ct_id,
                                  self.fps, nu, self.device,

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "setsuna"
-version = "1.0.0"
+version = "0.9.0"
 description = "SETSUNA: spike inference with temporal super-resolution for calcium imaging"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,11 @@ authors = [{ name = "Ryoma Hattori" }]
 license = { text = "GPL-3.0-or-later" }
 classifiers = ["License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)", "Programming Language :: Python :: 3"]
 dependencies = ["numpy>=1.23", "scipy>=1.10", "torch>=2.2", "numba>=0.57"]
+
+[project.urls]
+Homepage = "https://github.com/ryhattori/setsuna"
+Documentation = "https://github.com/ryhattori/setsuna/blob/main/docs/USER_GUIDE.md"
+Source = "https://github.com/ryhattori/setsuna"
 
 [project.scripts]
 setsuna = "setsuna.cli:main"

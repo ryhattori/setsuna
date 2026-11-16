@@ -221,7 +221,7 @@ def _infer_fast(sess, X, rows, tol, gain, rate, nu, spikes, progress=False):
 
 def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyramidal", tolerance_ms: float | None = 10.0,
           count_gain: float = 1.0, model_dir: str | Path | None = None, device: str = "auto", fine: bool = False,
-          progress: bool = False, batch_windows: int = 512) -> dict:
+          progress: bool = False, batch_windows: int = 512, bins_per_frame: int | None = None) -> dict:
     """Infer spikes for every neuron of ``dff`` (n_neurons x n_frames, fractional dF/F at ``fps`` Hz).
 
     ``tolerance_ms`` is the spike-timing precision your analysis needs; it picks the decoder and its smoothing width
@@ -231,7 +231,16 @@ def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyrami
     per neuron), ``spike_times`` (list of arrays, seconds from the first frame) and, with ``fine``, the 512-bin streams.
     Rows that are all NaN are returned as NaN with no spikes.
     On a CUDA GPU the neurons are pipelined (one neuron's forward pass runs while the previous one is decoded); lower
-    ``batch_windows`` if the GPU runs out of memory. ``fine=True`` processes one neuron at a time and is slower."""
+    ``batch_windows`` if the GPU runs out of memory. ``fine=True`` processes one neuron at a time and is slower.
+    ``bins_per_frame`` (a power of two up to 512, e.g. 16) returns the sub-frame streams sum-pooled to that many bins per
+    frame: ``count`` (expected spikes per bin), ``prob`` and, with ``tolerance_ms``, ``spike_counts`` (decoded spikes per
+    bin), each n_neurons x (n_frames * bins_per_frame). Sum-pooling keeps totals, so a stream saved at frame/16 can be
+    pooled further to any coarser bin. It implies ``fine`` and runs one neuron at a time."""
+    if bins_per_frame is not None:
+        k = int(bins_per_frame)
+        if k < 1 or k > 512 or (k & (k - 1)):
+            raise ValueError("bins_per_frame must be a power of two between 1 and 512")
+        fine = True
     X = np.atleast_2d(np.asarray(dff, np.float32))
     sess = Session(fps, indicator, cell_type, model_dir=model_dir, device=device, batch_windows=batch_windows)
     n, T = X.shape
@@ -259,6 +268,16 @@ def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyrami
            "band": sess.s.band, "tolerance_ms": tolerance_ms}
     if tolerance_ms is not None:
         out["spike_times"] = spikes
-    if fine:
+    if fine and bins_per_frame is None:
         out["count"], out["prob"], out["bins_per_frame"] = count, prob, sess.s.M
+    elif fine:
+        M, k = int(sess.s.M), int(bins_per_frame)
+        def pool(v):
+            return np.full(T * k, np.nan, np.float32) if v is None else                 np.asarray(v, np.float64)[:T * M].reshape(T, k, M // k).sum(-1).ravel().astype(np.float32)
+        out["count"] = np.stack([pool(v) for v in count])
+        out["prob"] = np.stack([pool(v) for v in prob])
+        out["bins_per_frame"] = k
+        if tolerance_ms is not None:
+            edges = np.arange(T * k + 1) / (float(fps) * k)
+            out["spike_counts"] = np.stack([np.histogram(st, edges)[0].astype(np.float32) for st in spikes])
     return out

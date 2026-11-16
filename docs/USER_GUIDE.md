@@ -35,9 +35,14 @@ Then install SETSUNA:
 At the default batch size SETSUNA uses about 6-8 GB of GPU memory; pass `batch_windows=256` (or lower) to
 `setsuna.infer` on a smaller GPU. Without a GPU, `device="cpu"` runs the same models.
 
+**Tested on** Windows 11 with Python 3.11, PyTorch 2.11 (CUDA 12.8), NumPy 2.0-2.4, SciPy 1.17 and Numba 0.65-0.68,
+on an NVIDIA GeForce RTX 4090 and on the CPU. No hardware beyond a standard computer is required; an NVIDIA GPU makes
+large recordings fast. A fresh install took about 2 minutes on a university network (PyTorch with CUDA about 100 s,
+SETSUNA and its other dependencies about 30 s).
+
 ## 2. Get the models
 
-The trained models are published as an archive of a release of this repository (release v1.0.0 for version 1.0.0 of
+The trained models are published as an archive of a release of this repository (release v0.9.0 for version 0.9.0 of
 the package, about 64 MB). They are downloaded automatically the first time you run SETSUNA. To install them
 beforehand, for example on a cluster node without internet access, run
 
@@ -45,18 +50,42 @@ beforehand, for example on a cluster node without internet access, run
 
 which downloads the archive, checks it against the checksum built into the package and unpacks it into
 `~/.setsuna/models` (`--model-dir` or `SETSUNA_MODEL_DIR` to put them elsewhere; set `SETSUNA_NO_DOWNLOAD=1` to turn
-off the automatic download). Check with
+off the automatic download). When `SETSUNA_MODEL_DIR` is set, SETSUNA uses that folder as it is and does not download
+into it; fill it with `setsuna download-models --model-dir <folder>`. Check with
 
     setsuna models
 
 JupiterScope's model download installs the same release.
 
-## 3. Prepare the input
+## 3. Demo
+
+`examples/demo.py` runs SETSUNA on one jGCaMP8s neuron whose spikes were recorded electrically at the same time
+(`examples/jGCaMP8s_ANM479572_cell08.npz`, 0.2 MB: raw and neuropil fluorescence, frame times and spike times from
+DANDI:000168, CC BY 4.0; see `examples/DATA_LICENSE.md`). It resamples the 122-Hz recording to 30.5 Hz, computes dF/F
+with `dff_from_fluorescence`, infers spikes at a 25-ms tolerance and compares them with the recorded spikes:
+
+    python examples/demo.py          # GPU if available
+    python examples/demo.py --cpu
+
+Expected output (version 0.9.0):
+
+    recording        : 170 s at 30.5 Hz, 127 recorded spikes
+    SETSUNA rate     : 121.4 expected spikes in total (sum of out['rate'])
+    SETSUNA spikes   : 121 inferred spike times (tolerance 25 ms)
+    within +- 25 ms  : 95 of 127 recorded spikes matched (75%)
+    within +-100 ms  : 105 of 127 recorded spikes matched (83%)
+    run time         : ...
+
+It runs in about 5 s on a GPU or a CPU, including loading the models (the models are downloaded first if they are not
+installed). The neuron is part of the public ground truth SETSUNA was trained on, so the demo shows how to run the
+software and what it returns, not held-out accuracy.
+
+## 4. Prepare the input
 
 SETSUNA reads **fractional dF/F** (0.5 means a 50% increase), one row per neuron, sampled at the frame rate.
 
-If you have raw fluorescence and neuropil traces (for example Suite2p's `F.npy` and `Fneu.npy`), let SETSUNA compute
-dF/F the way it was trained and benchmarked:
+If you have raw fluorescence and neuropil traces (for example Suite2p's `F.npy` and `Fneu.npy`), compute dF/F with
+SETSUNA's function:
 
 ```python
 import numpy as np, setsuna
@@ -66,14 +95,24 @@ dff = setsuna.dff_from_fluorescence(F[iscell], Fneu[iscell], fps=30.0, neuropil_
 ```
 
 The baseline is a maximin baseline over 60 s, which follows slow drift and stays under calcium transients whatever a
-neuron's firing; the neuropil-corrected trace is divided by the raw fluorescence baseline, which stays positive. If you
-already have dF/F from your own pipeline, use it directly, as long as it is fractional and not z-scored. SETSUNA
-standardizes each trace itself and measures its noise level on the fractional trace.
+neuron's firing; the neuropil-corrected trace is divided by the raw fluorescence baseline, which stays positive even
+for dim cells next to bright neuropil. If you already have dF/F from your own pipeline, use it directly, as long as it
+is fractional and not z-scored.
+
+**The size of dF/F matters for counts, not for timing.** SETSUNA standardizes each trace itself, but it reads the noise
+level from the fractional dF/F, and the models were trained on dF/F of a typical size. Dividing by the
+neuropil-corrected baseline instead of the raw one (a common convention) makes dF/F 2-4 times larger. On recordings
+with simultaneous electrophysiology, doubling or halving dF/F changed the median correlation of the rate with the
+recorded spikes by 0.03 or less, but scaled the number of inferred spikes by about 1.2-1.6 (doubling) or 0.7-0.9
+(halving). Use one dF/F convention for
+recordings whose rates you compare. Traces whose noise level is far below anything in training (dF/F several times
+too small) are run as if at a floor of the training range (`setsuna.engine.NU_GUARD_K`), which prevents the large
+over-counts such traces otherwise produce.
 
 **Frame rate.** Use the rate at which each neuron is sampled: for multi-plane imaging, the volume rate, not the
 line or plane rate.
 
-## 4. Run
+## 5. Run
 
 ```python
 out = setsuna.infer(dff, fps=30.0, indicator="jGCaMP8s", cell_type="pyramidal", tolerance_ms=10)
@@ -89,6 +128,14 @@ or from the command line:
 (`traces.npz` holds `F` and optionally `Fneu`; `--dff file.npy` takes dF/F directly.) The output file holds `rate`,
 `nu`, and the spike times as `spike_neuron` and `spike_time`.
 
+**Rates only.** `tolerance_ms=None` (command line: `--no-spikes`) skips the spike decoder and returns `rate` and `nu`.
+
+**Sub-frame streams.** `bins_per_frame=16` (command line: `--bins-per-frame 16`) also returns the count stream
+(`count`, expected spikes per bin), the within-frame stream (`prob`) and, with a tolerance, the decoded spikes per bin
+(`spike_counts`), each n_neurons x (n_frames x 16), sum-pooled from the model's 512 bins per frame. Sum-pooling keeps
+totals, so a stream saved at frame/16 can be pooled further to any coarser bin; frame/16 is about as fine as the
+models' timing supports below 60 Hz. This runs one neuron at a time and is slower than the default.
+
 For many recordings at the same frame rate and indicator, load the models once:
 
 ```python
@@ -97,7 +144,7 @@ for trace in traces:
     o = sess.infer_one(trace, tolerance_ms=10)
 ```
 
-## 5. Choosing the indicator and cell type
+## 6. Choosing the indicator and cell type
 
 | `indicator` | |
 |---|---|
@@ -116,7 +163,7 @@ Choose the indicator you imaged even if it is not listed (use `other`), rather t
 SETSUNA was tested this way, with the indicator or cell type withheld from training, and loses little in most
 populations.
 
-## 6. Choosing the timing tolerance
+## 7. Choosing the timing tolerance
 
 `tolerance_ms` is the precision with which your analysis needs spike times: a spike-time correlation at 5 ms needs
 5 ms; counting spikes per frame needs one frame. It selects the decoder:
@@ -131,7 +178,7 @@ from 1 to 25 ms. Decode with the tolerance of the analysis you will run; decodin
 for a 25-ms analysis loses accuracy. `tolerance_ms=None` returns rates only. `count_gain` (default 1) scales the
 number of decoded spikes, trading precision for recall.
 
-## 7. Reading the output
+## 8. Reading the output
 
 * **Rate** is in expected spikes per frame. Absolute counts depend on how large a single-spike transient is in your
   preparation, so compare counts within rather than across preparations.
@@ -141,9 +188,10 @@ number of decoded spikes, trading precision for recall.
 * **Within-frame timing has limits.** It needs enough signal in each frame. At the lowest signal-to-noise ratios and at
   1 Hz, placement within the frame can fall to chance, and isolated spikes at the lowest frame rates are too rare to be
   placed reliably. Detection and rates remain informative there.
-* `fine=True` returns the 512-bin count and within-frame streams for each neuron.
+* `fine=True` returns the full 512-bin count and within-frame streams for each neuron; `bins_per_frame` returns them
+  pooled (section 5).
 
-## 8. Frame rates and speed
+## 9. Frame rates and speed
 
 Each indicator has three networks for overlapping frame-rate bands (about 1-10, 8-60 and 40-120 Hz; jRGECO1a to
 25 Hz); SETSUNA picks the one for your frame rate and averages three independently trained copies. On a GPU,
@@ -151,6 +199,6 @@ Each indicator has three networks for overlapping frame-rate bands (about 1-10, 
 recent NVIDIA GPU an hour of recording from 10,000 neurons takes about a minute or two, and an hour of 3,000 mesoscope
 neurons at 10.7 Hz about 17 s. Lower `batch_windows` if the GPU runs out of memory.
 
-## 9. Citing
+## 10. Citing
 
 Hattori, R. Breaking the frame-rate limit of calcium imaging (2026).

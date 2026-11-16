@@ -44,6 +44,8 @@ def main(argv=None) -> int:
                    "spinal_inhibitory, unknown, or other")
     r.add_argument("--tolerance-ms", type=float, default=10.0, help="spike-timing precision the analysis needs (ms)")
     r.add_argument("--no-spikes", action="store_true", help="rates only")
+    r.add_argument("--bins-per-frame", type=int, default=None,
+                   help="also save sub-frame streams sum-pooled to this many bins per frame (power of two, e.g. 16)")
     r.add_argument("--neuropil-coefficient", type=float, default=0.7)
     r.add_argument("--model-dir", default=None)
     r.add_argument("--device", default="auto")
@@ -77,7 +79,7 @@ def main(argv=None) -> int:
         dff = setsuna.dff_from_fluorescence(F, Fneu, fps=a.fps, neuropil_coefficient=a.neuropil_coefficient)
     t0 = time.time()
     out = setsuna.infer(dff, a.fps, a.indicator, a.cell_type, None if a.no_spikes else a.tolerance_ms,
-                        model_dir=a.model_dir, device=a.device, progress=True)
+                        model_dir=a.model_dir, device=a.device, progress=True, bins_per_frame=a.bins_per_frame)
     save = {"rate": out["rate"], "nu": out["nu"], "fps": a.fps, "indicator": a.indicator, "cell_type": a.cell_type,
             "band": out["band"]}
     if not a.no_spikes:
@@ -85,6 +87,11 @@ def main(argv=None) -> int:
         save["spike_neuron"] = np.concatenate([np.full(len(s), i, np.int32) for i, s in enumerate(st)]) if st else np.zeros(0, np.int32)
         save["spike_time"] = np.concatenate(st) if st else np.zeros(0)
         save["tolerance_ms"] = a.tolerance_ms
+    if a.bins_per_frame:
+        save["bins_per_frame"] = out["bins_per_frame"]
+        for key in ("count", "prob", "spike_counts"):
+            if key in out:
+                save[key] = out[key].astype(np.float16)
     np.savez_compressed(a.out, **save)
     n_sp = len(save.get("spike_time", []))
     print(f"{dff.shape[0]} neurons, {dff.shape[1]} frames -> {a.out} ({n_sp} spikes; {time.time() - t0:.1f} s)")
