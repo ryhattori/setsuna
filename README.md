@@ -37,7 +37,7 @@ beforehand, run
 
 ## Documentation
 
-[docs/USER_GUIDE.md](docs/USER_GUIDE.md): installing, a demo on a recording with electrophysiology (`examples/demo.py`),
+[docs/USER_GUIDE.md](docs/USER_GUIDE.md): installing, a demo notebook on a recording with electrophysiology (`examples/demo.ipynb`),
 preparing input, choosing the indicator, cell type and timing tolerance, rates-only and sub-frame outputs, and
 reading the output.
 

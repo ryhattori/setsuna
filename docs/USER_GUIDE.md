@@ -59,13 +59,14 @@ JupiterScope's model download installs the same release.
 
 ## 3. Demo
 
-`examples/demo.py` runs SETSUNA on one jGCaMP8s neuron whose spikes were recorded electrically at the same time
+`examples/demo.ipynb` (a Jupyter notebook, with plots; `pip install matplotlib jupyter`) and `examples/demo.py` (the
+same steps as a script) run SETSUNA on one jGCaMP8s neuron whose spikes were recorded electrically at the same time
 (`examples/jGCaMP8s_ANM479572_cell08.npz`, 0.2 MB: raw and neuropil fluorescence, frame times and spike times from
-DANDI:000168, CC BY 4.0; see `examples/DATA_LICENSE.md`). It resamples the 122-Hz recording to 30.5 Hz, computes dF/F
+DANDI:000168, CC BY 4.0; see `examples/DATA_LICENSE.md`). Both resample the 122-Hz recording to 30.5 Hz, computes dF/F
 with `dff_from_fluorescence`, infers spikes at a 25-ms tolerance and compares them with the recorded spikes:
 
-    python examples/demo.py          # GPU if available
-    python examples/demo.py --cpu
+    cd examples
+    jupyter notebook demo.ipynb      # or: python demo.py (GPU if available), python demo.py --cpu
 
 Expected output (version 0.9.0):
 
