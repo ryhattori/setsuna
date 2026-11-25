@@ -203,7 +203,8 @@ populations.
 ## 7. Choosing the timing tolerance
 
 `tolerance_ms` is the precision with which your analysis needs spike times: a spike-time correlation at 5 ms needs
-5 ms; counting spikes per frame needs one frame. It selects the decoder:
+5 ms; counting spikes per frame needs one frame. You only choose the tolerance (default 10 ms); `infer` applies the
+rule below itself, from the tolerance and the frame rate:
 
 * below one frame and below 35 ms: the **timing decoder**, which places the expected number of spikes at the peaks of the
   within-frame output, smoothed by min(0.65 x tolerance, 9 ms) (4.5 ms above 30 Hz);
