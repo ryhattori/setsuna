@@ -46,6 +46,9 @@ def main(argv=None) -> int:
     r.add_argument("--no-spikes", action="store_true", help="rates only")
     r.add_argument("--bins-per-frame", type=int, default=None,
                    help="also save sub-frame streams sum-pooled to this many bins per frame (power of two, e.g. 16)")
+    r.add_argument("--smooth-ms", type=float, default=25.0,
+                   help="also save rate_smooth: the sub-frame rate (spikes/s) smoothed with a Gaussian of this sigma (ms); "
+                        "0 skips it")
     r.add_argument("--neuropil-coefficient", type=float, default=0.7)
     r.add_argument("--model-dir", default=None)
     r.add_argument("--device", default="auto")
@@ -79,7 +82,8 @@ def main(argv=None) -> int:
         dff = setsuna.dff_from_fluorescence(F, Fneu, fps=a.fps, neuropil_coefficient=a.neuropil_coefficient)
     t0 = time.time()
     out = setsuna.infer(dff, a.fps, a.indicator, a.cell_type, None if a.no_spikes else a.tolerance_ms,
-                        model_dir=a.model_dir, device=a.device, progress=True, bins_per_frame=a.bins_per_frame)
+                        model_dir=a.model_dir, device=a.device, progress=True, bins_per_frame=a.bins_per_frame,
+                        smooth_ms=a.smooth_ms if a.smooth_ms > 0 else None)
     save = {"rate": out["rate"], "nu": out["nu"], "fps": a.fps, "indicator": a.indicator, "cell_type": a.cell_type,
             "band": out["band"]}
     if not a.no_spikes:
@@ -87,6 +91,9 @@ def main(argv=None) -> int:
         save["spike_neuron"] = np.concatenate([np.full(len(s), i, np.int32) for i, s in enumerate(st)]) if st else np.zeros(0, np.int32)
         save["spike_time"] = np.concatenate(st) if st else np.zeros(0)
         save["tolerance_ms"] = a.tolerance_ms
+    if "rate_smooth" in out:
+        save["rate_smooth"] = out["rate_smooth"].astype(np.float16)
+        save["t_smooth"], save["smooth_ms"] = out["t_smooth"], out["smooth_ms"]
     if a.bins_per_frame:
         save["bins_per_frame"] = out["bins_per_frame"]
         for key in ("count", "prob", "spike_counts"):

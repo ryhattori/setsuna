@@ -120,6 +120,7 @@ out = setsuna.infer(dff, fps=30.0, indicator="jGCaMP8s", cell_type="pyramidal", 
 out["rate"]          # (n_neurons, n_frames) expected spikes per frame; x fps = spikes per second
 out["spike_times"]   # list of arrays, spike times in seconds from the first frame
 out["nu"]            # noise level of each trace (the standardized noise level used by CASCADE)
+out["rate_smooth"]   # (n_neurons, n_bins) spikes per second on a sub-frame grid, Gaussian-smoothed (sigma 25 ms)
 ```
 
 or from the command line:
@@ -127,9 +128,17 @@ or from the command line:
     setsuna run --npz traces.npz --fps 30 --indicator jGCaMP8s --tolerance-ms 10 --out spikes.npz
 
 (`traces.npz` holds `F` and optionally `Fneu`; `--dff file.npy` takes dF/F directly.) The output file holds `rate`,
-`nu`, and the spike times as `spike_neuron` and `spike_time`.
+`nu`, `rate_smooth` and `t_smooth`, and the spike times as `spike_neuron` and `spike_time`.
 
 **Rates only.** `tolerance_ms=None` (command line: `--no-spikes`) skips the spike decoder and returns `rate` and `nu`.
+
+**Smoothed rate.** `out["rate_smooth"]` is the rate in spikes/s on a grid finer than the frame (k bins per frame, the
+smallest power of two whose bin is at most a quarter of the smoothing width; `out["t_smooth"]` holds the bin centres
+in seconds from the first frame), smoothed with a Gaussian of sigma `smooth_ms` (default 25 ms at every frame rate;
+command line: `--smooth-ms`). It keeps each frame's total from `rate`, so it is the natural input for rate analyses,
+plots and averages on a time axis. Below about 8 Hz the position of a peak within its frame is approximate; use a
+larger `smooth_ms` for a smoother rate. `smooth_ms=None` (command line: `--smooth-ms 0`) skips it. For long recordings
+of many neurons it is large: about 4 bytes x 200-400 samples per second per neuron.
 
 **Sub-frame streams.** `bins_per_frame=16` (command line: `--bins-per-frame 16`) also returns the count stream
 (`count`, expected spikes per bin), the within-frame stream (`prob`) and, with a tolerance, the decoded spikes per bin

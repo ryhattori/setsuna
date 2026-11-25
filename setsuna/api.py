@@ -4,6 +4,8 @@
     dff = setsuna.dff_from_fluorescence(F, Fneu, fps=30.0)            # (n_neurons, n_frames) fractional dF/F
     out = setsuna.infer(dff, fps=30.0, indicator="jGCaMP8s", tolerance_ms=10)
     out["rate"]            # (n_neurons, n_frames) expected spikes per frame
+    out["rate_smooth"]     # (n_neurons, n_bins) spikes/s on a sub-frame grid, Gaussian-smoothed (sigma 25 ms)
+    out["t_smooth"]        # (n_bins,) bin centres, seconds from the first frame
     out["spike_times"]     # list of 1-D arrays, spike times in seconds from the first frame
 
 Everything below calls the inference engine (engine.py) unchanged; see docs/USER_GUIDE.md.
@@ -23,6 +25,8 @@ INDICATORS = {
     "jGCaMP8s": "GCaMP8s", "jGCaMP8m": "GCaMP8m", "jGCaMP8f": "GCaMP8f", "jGCaMP7f": "GCaMP7f",
     "GCaMP6s": "GCaMP6s", "GCaMP6f": "GCaMP6f", "jRGECO1a": "jGECO1a", "other": "other",
 }
+#: Default Gaussian sigma (ms) of ``rate_smooth``: the same at every frame rate.
+SMOOTH_MS = 25.0
 #: Cell types accepted by infer(). "unknown" = probably pyramidal; "other" = a type not listed.
 CELL_TYPES = ("pyramidal", "PV_FS", "SST", "VIP", "spinal_excitatory", "spinal_inhibitory", "unknown", "other")
 
@@ -102,12 +106,50 @@ class Session:
         return out
 
 
-def _infer_fast(sess, X, rows, tol, gain, rate, nu, spikes, progress=False):
+def _smooth_bins_per_frame(fps: float, sigma_ms: float) -> int:
+    """Bins per frame of ``rate_smooth``: the smallest power of two (<= 512) whose bin is at most a quarter of sigma."""
+    frame_ms, k = 1000.0 / float(fps), 1
+    while k < 512 and frame_ms / k > sigma_ms / 4.0:
+        k *= 2
+    return k
+
+
+def _smooth_rate(stream: np.ndarray, k: int, fps: float, sigma_ms: float, device=None) -> np.ndarray:
+    """Expected spikes per bin (n_neurons x n_frames*k) -> Gaussian-smoothed rate in spikes/s, in blocks of rows.
+    The kernel is scipy's (truncated at 4 sigma, edges reflected); on a CUDA ``device`` it runs there as one
+    convolution per block, otherwise through scipy.ndimage."""
+    sig = sigma_ms / 1000.0 * float(fps) * k
+    scale = np.float32(fps * k)
+    out = np.empty(stream.shape, np.float32)
+    rad = int(4.0 * sig + 0.5)
+    if device is not None and str(getattr(device, "type", device)).startswith("cuda") and 0 < rad < stream.shape[1]:
+        import torch
+        x = np.arange(-rad, rad + 1, dtype=np.float64)
+        w = np.exp(-0.5 * (x / sig) ** 2); w /= w.sum()
+        wt = torch.as_tensor((w * scale).astype(np.float32), device=device).view(1, 1, -1)
+        step = int(max(1, (256 << 20) // max(1, 4 * stream.shape[1])))
+        with torch.no_grad():
+            for a in range(0, stream.shape[0], step):
+                xb = torch.as_tensor(np.ascontiguousarray(stream[a:a + step]), device=device).unsqueeze(1)
+                # scipy's "reflect" repeats the edge sample (d c b a | a b c d), unlike torch's
+                xb = torch.cat([xb[..., :rad].flip(-1), xb, xb[..., -rad:].flip(-1)], -1)
+                out[a:a + step] = torch.nn.functional.conv1d(xb, wt).squeeze(1).cpu().numpy()
+        return out
+    from scipy import ndimage as ndi
+    step = int(max(1, (64 << 20) // max(1, 4 * stream.shape[1])))
+    for a in range(0, stream.shape[0], step):
+        blk = np.asarray(stream[a:a + step], np.float32)
+        out[a:a + step] = ndi.gaussian_filter1d(blk, sig, axis=1, mode="reflect") * scale
+    return out
+
+
+def _infer_fast(sess, X, rows, tol, gain, rate, nu, spikes, progress=False, sub=None, sub_k=0):
     """Every row of X through the session the way JupiterScope's session runner does it (the paper's speed
     benchmark): on CUDA each row's forward is queued before the previous row is collected and decoded, the timing
     decoder decodes groups of rows per launch on a worker thread, the detection decoder runs on worker threads, and the
     per-row noise and z-score statistics are computed in blocks on a side thread. Same rates and spike times as
-    Session.infer_one, row for row."""
+    Session.infer_one, row for row. With ``sub`` (n x n_frames*sub_k), each row's count stream is also sum-pooled to
+    ``sub_k`` bins per frame on the device and stored there."""
     import os
     import threading
     from concurrent.futures import ThreadPoolExecutor
@@ -144,6 +186,8 @@ def _infer_fast(sess, X, rows, tol, gain, rate, nu, spikes, progress=False):
     def collect(row, out):
         E.finish_outputs(out)
         rate[row] = out["rate"]; nu[row] = out["nu"]
+        if sub is not None:
+            sub[row] = np.asarray(out["lam_pooled"], np.float32)[:sub.shape[1]]
 
     def decode_st(out):
         return E.decode_spike_times(out.get("lam"), out["prob"], M, fs, tol_ms=float(tol), count_gain=float(gain),
@@ -197,7 +241,7 @@ def _infer_fast(sess, X, rows, tol, gain, rate, nu, spikes, progress=False):
     try:
         for k, row in enumerate(rows):
             nxt = (int(rows[k + 1]), X[rows[k + 1]]) if k + 1 < len(rows) else None
-            out = S.infer_roi_outputs(X[row], pool_k=None, need_full=want and not evc, full_device=True, key=int(row),
+            out = S.infer_roi_outputs(X[row], pool_k=(M // sub_k if sub is not None else None), need_full=want and not evc, full_device=True, key=int(row),
                                       prefetch=nxt, fine_prob=evc, defer_copy=pipelined, seg_bins=seg_bins)
             if pipelined:
                 pending.append((int(row), out))
@@ -221,7 +265,8 @@ def _infer_fast(sess, X, rows, tol, gain, rate, nu, spikes, progress=False):
 
 def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyramidal", tolerance_ms: float | None = 10.0,
           count_gain: float = 1.0, model_dir: str | Path | None = None, device: str = "auto", fine: bool = False,
-          progress: bool = False, batch_windows: int = 512, bins_per_frame: int | None = None) -> dict:
+          progress: bool = False, batch_windows: int = 512, bins_per_frame: int | None = None,
+          smooth_ms: float | None = SMOOTH_MS) -> dict:
     """Infer spikes for every neuron of ``dff`` (n_neurons x n_frames, fractional dF/F at ``fps`` Hz).
 
     ``tolerance_ms`` is the spike-timing precision your analysis needs; it picks the decoder and its smoothing width
@@ -235,7 +280,13 @@ def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyrami
     ``bins_per_frame`` (a power of two up to 512, e.g. 16) returns the sub-frame streams sum-pooled to that many bins per
     frame: ``count`` (expected spikes per bin), ``prob`` and, with ``tolerance_ms``, ``spike_counts`` (decoded spikes per
     bin), each n_neurons x (n_frames * bins_per_frame). Sum-pooling keeps totals, so a stream saved at frame/16 can be
-    pooled further to any coarser bin. It implies ``fine`` and runs one neuron at a time."""
+    pooled further to any coarser bin. It implies ``fine`` and runs one neuron at a time.
+    ``smooth_ms`` (default 25, the same at every frame rate) also returns ``rate_smooth``: the sub-frame count stream
+    smoothed with a Gaussian of that sigma, in spikes/s, n_neurons x (n_frames * k) with k bins per frame (the smallest
+    power of two whose bin is at most sigma/4; ``smooth_bins_per_frame``), and ``t_smooth``, the bin centres in seconds
+    from the first frame. It keeps the per-frame totals of ``rate``: a continuous rate for analyses and plots on a
+    time axis. Most of its information is the per-frame count; below ~8 Hz the position of a peak within its frame is
+    approximate, so widen ``smooth_ms`` for a smoother rate. ``None`` skips it."""
     if bins_per_frame is not None:
         k = int(bins_per_frame)
         if k < 1 or k > 512 or (k & (k - 1)):
@@ -244,30 +295,41 @@ def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyrami
     X = np.atleast_2d(np.asarray(dff, np.float32))
     sess = Session(fps, indicator, cell_type, model_dir=model_dir, device=device, batch_windows=batch_windows)
     n, T = X.shape
+    if smooth_ms is not None and not float(smooth_ms) > 0:
+        raise ValueError("smooth_ms must be positive, or None to skip rate_smooth")
+    sk = min(_smooth_bins_per_frame(fps, float(smooth_ms)), int(sess.s.M)) if smooth_ms is not None else 0
+    sub = np.full((n, T * sk), np.nan, np.float32) if sk else None
     rate = np.full((n, T), np.nan, np.float32); nu = np.full(n, np.nan); spikes = [np.zeros(0) for _ in range(n)]
     count, prob = ([None] * n, [None] * n) if fine else (None, None)
     if not fine:
         ok = np.isfinite(X).any(1)
         X = np.where(np.isfinite(X), X, 0.0).astype(np.float32)
-        _infer_fast(sess, X, np.flatnonzero(ok), tolerance_ms, count_gain, rate, nu, spikes, progress)
+        _infer_fast(sess, X, np.flatnonzero(ok), tolerance_ms, count_gain, rate, nu, spikes, progress, sub, sk)
         n = 0   # every row done
     for i in range(n):
         row = X[i]
         if not np.isfinite(row).any():
             continue
         row = np.where(np.isfinite(row), row, 0.0).astype(np.float32)
-        o = sess.infer_one(row, tolerance_ms=tolerance_ms, count_gain=count_gain, fine=fine)
+        o = sess.infer_one(row, tolerance_ms=tolerance_ms, count_gain=count_gain, fine=fine or sub is not None)
         rate[i], nu[i] = o["rate"], o["nu"]
         if tolerance_ms is not None:
             spikes[i] = o["spike_times"]
         if fine:
             count[i], prob[i] = o["count"], o["prob"]
+        if sub is not None:
+            M = int(sess.s.M)
+            sub[i] = np.asarray(o["count"], np.float64)[:T * M].reshape(T, sk, M // sk).sum(-1).ravel()
         if progress and (i + 1) % 100 == 0:
             print(f"  {i + 1}/{n} neurons", flush=True)
     out = {"rate": rate, "nu": nu, "fps": float(fps), "indicator": indicator, "cell_type": cell_type,
            "band": sess.s.band, "tolerance_ms": tolerance_ms}
     if tolerance_ms is not None:
         out["spike_times"] = spikes
+    if sub is not None:
+        out["rate_smooth"] = _smooth_rate(sub, sk, fps, float(smooth_ms), device=sess.s.device)
+        out["t_smooth"] = (np.arange(T * sk) + 0.5) / (float(fps) * sk)
+        out["smooth_ms"], out["smooth_bins_per_frame"] = float(smooth_ms), sk
     if fine and bins_per_frame is None:
         out["count"], out["prob"], out["bins_per_frame"] = count, prob, sess.s.M
     elif fine:
