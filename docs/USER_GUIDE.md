@@ -9,10 +9,14 @@ and the cell type of each recording, and returns
   time grid finer than the frame, and
 * **spike times**, decoded at the timing precision your analysis needs.
 
-Which to use: for **firing-rate analyses** (tuning, correlations, trial-averaged responses) use the smoothed sub-frame
-rate (`smooth_ms=25`, section 5); for **timing analyses** (when spikes occur, response onsets and latencies, synchrony
-between neurons, timing within the frame) use the **spike times**, with the tolerance set to the precision the analysis
-needs (section 7).
+## Which output to use
+
+* **Firing-rate analyses** (tuning, correlations, trial-averaged responses, population activity): the smoothed
+  sub-frame rate, `out["rate_smooth"]` from `infer(..., smooth_ms=25)` (section 5).
+* **Timing analyses** (when spikes occur, response onsets and latencies, synchrony between neurons, timing within the
+  frame): the **spike times**, `out["spike_times"]`, with the tolerance set to the precision the analysis needs
+  (section 7).
+* **Frame-level analyses** (anything binned at the imaging frame): the per-frame `rate`.
 
 ## 1. Install
 
