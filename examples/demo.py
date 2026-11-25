@@ -42,7 +42,7 @@ def main():
 
     t0 = time.time()
     dff = setsuna.dff_from_fluorescence(F[None], Fneu[None], fps=fps)
-    out = setsuna.infer(dff, fps=fps, indicator="jGCaMP8s", cell_type="pyramidal", tolerance_ms=25,
+    out = setsuna.infer(dff, fps=fps, indicator="jGCaMP8s", cell_type="pyramidal", tolerance_ms=25, smooth_ms=25,
                         device="cpu" if a.cpu else "auto")
     run_s = time.time() - t0
 
@@ -55,6 +55,13 @@ def main():
         m = matched(spikes, inferred, tol)
         print("within +-%3d ms  : %d of %d recorded spikes matched (%.0f%%)" % (tol * 1000, m, len(spikes),
                                                                           100.0 * m / max(len(spikes), 1)))
+    # firing rate: the smoothed sub-frame rate against the recorded spikes smoothed with the same 25-ms Gaussian
+    from scipy.ndimage import gaussian_filter1d
+    ts, rsm = out["t_smooth"], out["rate_smooth"][0]
+    dt = ts[1] - ts[0]
+    true_sm = gaussian_filter1d(np.histogram(spikes, np.append(ts - dt / 2, ts[-1] + dt / 2))[0] / dt, 0.025 / dt)
+    print("smoothed rate    : correlation %.3f with the recorded spikes (both 25-ms Gaussian)"
+          % np.corrcoef(rsm, true_sm)[0, 1])
     print("run time         : %.1f s (including loading the models)" % run_s)
 
 
