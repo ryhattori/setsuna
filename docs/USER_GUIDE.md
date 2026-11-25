@@ -137,7 +137,9 @@ smallest power of two whose bin is at most a quarter of the smoothing width; `ou
 in seconds from the first frame): each frame's count spread evenly over its bins and smoothed with a Gaussian of sigma
 `smooth_ms` (default 25 ms at every frame rate; command line: `--smooth-ms`). Frame totals equal `rate`, so it is the
 natural input for rate analyses, plots and averages on a time axis. At low frame rates it follows the frames' steps;
-use a larger `smooth_ms` for a smoother curve, and `spike_times` for timing within the frame. `smooth_ms=None`
+use a larger `smooth_ms` for a smoother curve, and `spike_times` for timing within the frame. In particular, for
+the onset or latency of a response at low frame rates, average spike times across trials rather than `rate_smooth`:
+the rate spreads each frame's spikes over the whole frame, so its rise starts early by up to a frame. `smooth_ms=None`
 (command line: `--smooth-ms 0`) skips it. For long recordings of many neurons it is large: about 4 bytes x 200-400
 samples per second per neuron.
 
