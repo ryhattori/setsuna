@@ -132,13 +132,14 @@ or from the command line:
 
 **Rates only.** `tolerance_ms=None` (command line: `--no-spikes`) skips the spike decoder and returns `rate` and `nu`.
 
-**Smoothed rate.** `out["rate_smooth"]` is the rate in spikes/s on a grid finer than the frame (k bins per frame, the
+**Smoothed rate.** `out["rate_smooth"]` is `rate` in spikes/s on a grid finer than the frame (k bins per frame, the
 smallest power of two whose bin is at most a quarter of the smoothing width; `out["t_smooth"]` holds the bin centres
-in seconds from the first frame), smoothed with a Gaussian of sigma `smooth_ms` (default 25 ms at every frame rate;
-command line: `--smooth-ms`). It keeps each frame's total from `rate`, so it is the natural input for rate analyses,
-plots and averages on a time axis. Below about 8 Hz the position of a peak within its frame is approximate; use a
-larger `smooth_ms` for a smoother rate. `smooth_ms=None` (command line: `--smooth-ms 0`) skips it. For long recordings
-of many neurons it is large: about 4 bytes x 200-400 samples per second per neuron.
+in seconds from the first frame): each frame's count spread evenly over its bins and smoothed with a Gaussian of sigma
+`smooth_ms` (default 25 ms at every frame rate; command line: `--smooth-ms`). Frame totals equal `rate`, so it is the
+natural input for rate analyses, plots and averages on a time axis. At low frame rates it follows the frames' steps;
+use a larger `smooth_ms` for a smoother curve, and `spike_times` for timing within the frame. `smooth_ms=None`
+(command line: `--smooth-ms 0`) skips it. For long recordings of many neurons it is large: about 4 bytes x 200-400
+samples per second per neuron.
 
 **Sub-frame streams.** `bins_per_frame=16` (command line: `--bins-per-frame 16`) also returns the count stream
 (`count`, expected spikes per bin), the within-frame stream (`prob`) and, with a tolerance, the decoded spikes per bin

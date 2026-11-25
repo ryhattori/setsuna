@@ -47,8 +47,8 @@ def main(argv=None) -> int:
     r.add_argument("--bins-per-frame", type=int, default=None,
                    help="also save sub-frame streams sum-pooled to this many bins per frame (power of two, e.g. 16)")
     r.add_argument("--smooth-ms", type=float, default=25.0,
-                   help="also save rate_smooth: the sub-frame rate (spikes/s) smoothed with a Gaussian of this sigma (ms); "
-                        "0 skips it")
+                   help="also save rate_smooth: the rate (spikes/s) on a fine time grid, smoothed with a Gaussian of this "
+                        "sigma (ms); 0 skips it")
     r.add_argument("--neuropil-coefficient", type=float, default=0.7)
     r.add_argument("--model-dir", default=None)
     r.add_argument("--device", default="auto")

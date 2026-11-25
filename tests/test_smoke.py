@@ -34,9 +34,10 @@ def test_smooth_grid():
     from setsuna.api import _smooth_bins_per_frame, _smooth_rate
     assert _smooth_bins_per_frame(30.0, 25.0) == 8 and _smooth_bins_per_frame(3.0, 25.0) == 64
     assert _smooth_bins_per_frame(1000.0, 25.0) == 1
-    x = np.zeros((2, 4000), np.float32); x[0, 2000] = 1.0          # one expected spike, k = 8 at 30 Hz
+    x = np.zeros((2, 500), np.float32); x[0, 250] = 1.0            # one expected spike, k = 8 at 30 Hz
     r = _smooth_rate(x, 8, 30.0, 25.0)
-    assert np.isclose(r[0].sum() / (30.0 * 8), 1.0, atol=1e-4) and not r[1].any()   # spikes/s, total kept
+    assert r.shape == (2, 4000) and not r[1].any()
+    assert np.isclose(r[0].sum() / (30.0 * 8), 1.0, atol=1e-4)      # spikes/s; the total is kept
 
 
 @pytest.mark.skipif(not _models(), reason="models not installed")
