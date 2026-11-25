@@ -148,10 +148,14 @@ Smoothing is off by default only because of size: `rate_smooth` is k times large
 `setsuna.smooth_rate` smooths a sub-frame count stream you already have, for any neurons and time window:
 
 ```python
-out = setsuna.infer(dff, fps=30.0, bins_per_frame=16)
-r = setsuna.smooth_rate(out["count"], fps=30.0, bins_per_frame=16, smooth_ms=25, neurons=[0, 5], start_s=60, end_s=120)
-r["rate_smooth"], r["t_smooth"]
+out = setsuna.infer(dff, fps=30.0, bins_per_frame=16)          # the sub-frame count stream: out["count"]
+r = setsuna.smooth_rate(out["count"], fps=30.0, bins_per_frame=16, smooth_ms=25,
+                        neurons=[0, 5],              # which neurons (rows); omit for all
+                        start_s=60, end_s=120)       # time window in seconds from the first frame; omit for all
+r["rate_smooth"], r["t_smooth"]                      # spikes/s and bin times (s) for that subset only
 ```
+
+The values are those of the whole recording cut to the window (the edges are smoothed with the data around them).
 
 **Sub-frame streams.** `bins_per_frame=16` (command line: `--bins-per-frame 16`) also returns the count stream
 (`count`, expected spikes per bin), the within-frame stream (`prob`) and, with a tolerance, the decoded spikes per bin
