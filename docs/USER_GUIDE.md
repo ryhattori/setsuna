@@ -140,15 +140,11 @@ smallest power of two that makes a bin at most a quarter of the smoothing width)
 and the other outputs are returned as usual, and frame totals equal `rate`. We use 25 ms at every frame rate. The count
 stream is nearly flat within each frame, so for the timing of single spikes use `spike_times`. In particular, for the
 onset or latency of a response at low frame rates, average spike times across trials rather than `rate_smooth`, whose
-rise starts early by up to a frame. (With smoothing on, `rate` at 10 Hz and below can differ from a run without it in
-the last float32 digit, because the pooled GPU path sums in another order; spike times are identical.)
+rise starts early by up to a frame.
 
-Smoothing is off by default only because of size: the grid is about 160-320 samples per second per neuron at any frame
-rate, so `rate_smooth` is k times larger than `rate` (k = 8 at 30 Hz, 16 at 10 Hz, 128 at 2 Hz); an hour of 10,000
-neurons is about 35 GB. `infer` therefore refuses an in-memory `rate_smooth` above 2 GB before it starts and says how
-large it would be. Pass `rate_smooth_path="rate_smooth.npy"` to write it to disk (filled during inference and smoothed
-there block by block, so any machine with the disk space can do it; returned memory-mapped), or raise the limit with
-`max_smooth_gb`. On the command line, a `rate_smooth` above 2 GB goes to `<out>_rate_smooth.npy` automatically.
+Smoothing is off by default only because of size: `rate_smooth` is k times larger than `rate` (k = 8 at 30 Hz,
+128 at 2 Hz). For very large runs, pass `rate_smooth_path="rate_smooth.npy"` to write it to disk instead of memory.
+
 `setsuna.smooth_rate` smooths a sub-frame count stream you already have, for any neurons and time window:
 
 ```python
