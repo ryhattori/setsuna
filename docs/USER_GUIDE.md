@@ -132,16 +132,30 @@ or from the command line:
 
 **Rates only.** `tolerance_ms=None` (command line: `--no-spikes`) skips the spike decoder and returns `rate` and `nu`.
 
-**Smoothed rate.** `out["rate_smooth"]` is `rate` in spikes/s on a grid finer than the frame (k bins per frame, the
-smallest power of two whose bin is at most a quarter of the smoothing width; `out["t_smooth"]` holds the bin centres
-in seconds from the first frame): each frame's count spread evenly over its bins and smoothed with a Gaussian of sigma
-`smooth_ms` (default 25 ms at every frame rate; command line: `--smooth-ms`). Frame totals equal `rate`, so it is the
-natural input for rate analyses, plots and averages on a time axis. At low frame rates it follows the frames' steps;
+**Smoothed rate (recommended for rate analyses).** `rate` is one value per frame, so on a time axis it is a staircase.
+For rate analyses, plots and averages, pass `smooth_ms=25` (command line: `--smooth-ms 25`): `out["rate_smooth"]` is
+then `rate` in spikes/s on a grid finer than the frame (k bins per frame, the smallest power of two whose bin is at most
+a quarter of the smoothing width; `out["t_smooth"]` holds the bin centres in seconds from the first frame), each frame's
+count spread evenly over its bins and smoothed with a Gaussian of sigma `smooth_ms`. `rate` and the other outputs are
+returned as usual, and frame totals equal `rate`. Smoothing is off by default only because the smoothed array is
+8-16 times larger than `rate`. We use 25 ms at every frame rate. At low frame rates it follows the frames' steps;
 use a larger `smooth_ms` for a smoother curve, and `spike_times` for timing within the frame. In particular, for
 the onset or latency of a response at low frame rates, average spike times across trials rather than `rate_smooth`:
-the rate spreads each frame's spikes over the whole frame, so its rise starts early by up to a frame. `smooth_ms=None`
-(command line: `--smooth-ms 0`) skips it. For long recordings of many neurons it is large: about 4 bytes x 200-400
-samples per second per neuron.
+the rate spreads each frame's spikes over the whole frame, so its rise starts early by up to a frame. 
+
+`rate_smooth` is computed from `rate` alone, so it can also be made afterwards, for any neurons and time window, with
+the same values and memory in proportion to what you ask for:
+
+```python
+r = setsuna.smooth_rate(out["rate"], fps=30.0, smooth_ms=25, neurons=[0, 5], start_s=60, end_s=120)
+r["rate_smooth"], r["t_smooth"]
+```
+
+It takes about 4 bytes x 200-400 samples per second per neuron, so for very large runs (an hour of 10,000 neurons is
+about 35 GB) `infer` refuses an in-memory `rate_smooth` above 2 GB before it starts and says how large it would be.
+Pass `rate_smooth_path="rate_smooth.npy"` to write it to disk block by block (returned memory-mapped; any machine with
+the disk space can do it), raise the limit with `max_smooth_gb`, or use `smooth_rate` on the parts you need. On the
+command line, a `rate_smooth` above 2 GB goes to `<out>_rate_smooth.npy` automatically.
 
 **Sub-frame streams.** `bins_per_frame=16` (command line: `--bins-per-frame 16`) also returns the count stream
 (`count`, expected spikes per bin), the within-frame stream (`prob`) and, with a tolerance, the decoded spikes per bin

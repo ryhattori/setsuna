@@ -45,7 +45,33 @@ def test_rate_smooth_totals():
     fps, T = 10.0, 3000
     rng = np.random.default_rng(2)
     dff = (0.05 * rng.normal(size=(2, T))).astype(np.float32); dff[:, 1000:1010] += 0.5
-    out = setsuna.infer(dff, fps, "jGCaMP8s", tolerance_ms=None, device="cpu")
+    out = setsuna.infer(dff, fps, "jGCaMP8s", tolerance_ms=None, device="cpu", smooth_ms=25)
     k = out["smooth_bins_per_frame"]
     assert out["rate_smooth"].shape == (2, T * k) and out["t_smooth"].shape == (T * k,)
     assert np.allclose(out["rate_smooth"].sum(1) / (fps * k), out["rate"].sum(1), rtol=1e-3)
+
+
+def test_smooth_rate_subsets():
+    """smooth_rate on a subset of neurons / a time window equals the same slice of the whole recording; out_path matches."""
+    import tempfile, os
+    rng = np.random.default_rng(3)
+    rate = rng.gamma(0.3, 0.2, (5, 900)).astype(np.float32)
+    full = setsuna.smooth_rate(rate, 30.0, 25.0)
+    k = full["bins_per_frame"]
+    sub = setsuna.smooth_rate(rate, 30.0, 25.0, neurons=[1, 3], start_s=10.0, end_s=20.0)
+    a, b = int(10.0 * 30) * k, int(20.0 * 30) * k
+    assert np.allclose(sub["rate_smooth"], full["rate_smooth"][[1, 3], a:b], rtol=1e-5, atol=1e-6)
+    assert np.allclose(sub["t_smooth"], full["t_smooth"][a:b])
+    with tempfile.TemporaryDirectory() as d:
+        disk = setsuna.smooth_rate(rate, 30.0, 25.0, out_path=os.path.join(d, "rs.npy"))
+        assert np.allclose(np.asarray(disk["rate_smooth"]), full["rate_smooth"])
+        del disk
+
+
+@pytest.mark.skipif(not _models(), reason="models not installed")
+def test_rate_smooth_size_guard():
+    dff = np.zeros((4, 2000), np.float32)
+    with pytest.raises(ValueError, match="GiB"):
+        setsuna.infer(dff, 10.0, "jGCaMP8s", tolerance_ms=None, device="cpu", smooth_ms=25, max_smooth_gb=1e-6)
+    out = setsuna.infer(dff, 10.0, "jGCaMP8s", tolerance_ms=None, device="cpu")
+    assert "rate_smooth" not in out                                  # off by default

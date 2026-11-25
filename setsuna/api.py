@@ -4,8 +4,11 @@
     dff = setsuna.dff_from_fluorescence(F, Fneu, fps=30.0)            # (n_neurons, n_frames) fractional dF/F
     out = setsuna.infer(dff, fps=30.0, indicator="jGCaMP8s", tolerance_ms=10)
     out["rate"]            # (n_neurons, n_frames) expected spikes per frame
+
+    out = setsuna.infer(dff, fps=30.0, smooth_ms=25)                  # recommended for rate analyses:
     out["rate_smooth"]     # (n_neurons, n_bins) spikes/s on a fine time grid, Gaussian-smoothed (sigma 25 ms)
     out["t_smooth"]        # (n_bins,) bin centres, seconds from the first frame
+    setsuna.smooth_rate(out["rate"], fps=30.0, neurons=[0, 5], start_s=60, end_s=120)   # the same, for any subset
     out["spike_times"]     # list of 1-D arrays, spike times in seconds from the first frame
 
 Everything below calls the inference engine (engine.py) unchanged; see docs/USER_GUIDE.md.
@@ -18,15 +21,17 @@ import os
 
 import numpy as np
 
-__all__ = ["dff_from_fluorescence", "infer", "Session", "INDICATORS", "CELL_TYPES"]
+__all__ = ["dff_from_fluorescence", "infer", "smooth_rate", "Session", "INDICATORS", "CELL_TYPES", "SMOOTH_MS"]
 
 #: Indicator names accepted by infer() (display spelling -> the name the models use). Any other indicator: "other".
 INDICATORS = {
     "jGCaMP8s": "GCaMP8s", "jGCaMP8m": "GCaMP8m", "jGCaMP8f": "GCaMP8f", "jGCaMP7f": "GCaMP7f",
     "GCaMP6s": "GCaMP6s", "GCaMP6f": "GCaMP6f", "jRGECO1a": "jGECO1a", "other": "other",
 }
-#: Default Gaussian sigma (ms) of ``rate_smooth``: the same at every frame rate.
+#: Recommended Gaussian sigma (ms) for ``rate_smooth`` / smooth_rate(): the same at every frame rate.
 SMOOTH_MS = 25.0
+#: infer(smooth_ms=...) refuses to build an in-memory ``rate_smooth`` larger than this (GiB) unless told otherwise; see infer().
+MAX_SMOOTH_GB = 2.0
 #: Cell types accepted by infer(). "unknown" = probably pyramidal; "other" = a type not listed.
 CELL_TYPES = ("pyramidal", "PV_FS", "SST", "VIP", "spinal_excitatory", "spinal_inhibitory", "unknown", "other")
 
@@ -114,15 +119,17 @@ def _smooth_bins_per_frame(fps: float, sigma_ms: float) -> int:
     return k
 
 
-def _smooth_rate(rate: np.ndarray, k: int, fps: float, sigma_ms: float, device=None) -> np.ndarray:
+def _smooth_rate(rate: np.ndarray, k: int, fps: float, sigma_ms: float, device=None, out=None) -> np.ndarray:
     """Per-frame rate (n_neurons x n_frames, expected spikes per frame) -> spikes/s on k bins per frame, each frame's
     count spread evenly over its bins, then Gaussian-smoothed (scipy's kernel: truncated at 4 sigma, edges reflected).
     The count head's own sub-frame stream is flat within the frame (max/mean 1.03 at 8 bins per frame, 2-122 Hz), so
-    this is the same rate without the extra stream. On a CUDA ``device`` it runs there, in blocks of rows."""
+    this is the same rate without the extra stream. On a CUDA ``device`` it runs there, in blocks of rows of ~256 MB; ``out``
+    (n_neurons x n_frames*k float32, e.g. a np.memmap) receives the result block by block."""
     sig = sigma_ms / 1000.0 * float(fps) * k
     scale = np.float32(fps)                        # (rate / k per bin) x (fps * k bins per s)
     n, T = rate.shape
-    out = np.empty((n, T * k), np.float32)
+    if out is None:
+        out = np.empty((n, T * k), np.float32)
     rad = int(4.0 * sig + 0.5)
     step = int(max(1, (256 << 20) // max(1, 4 * T * k)))
     if device is not None and str(getattr(device, "type", device)).startswith("cuda") and 0 < rad < T * k:
@@ -143,6 +150,43 @@ def _smooth_rate(rate: np.ndarray, k: int, fps: float, sigma_ms: float, device=N
         blk = np.repeat(np.asarray(rate[a:a + step], np.float32), k, axis=1)
         out[a:a + step] = ndi.gaussian_filter1d(blk, sig, axis=1, mode="reflect") * scale
     return out
+
+
+def smooth_rate(rate, fps: float, smooth_ms: float = SMOOTH_MS, neurons=None, start_s: float | None = None,
+                end_s: float | None = None, out_path: str | Path | None = None, device=None) -> dict:
+    """``rate`` (n_neurons x n_frames, expected spikes per frame, as returned by infer) -> the smoothed rate in spikes/s:
+    each frame's count spread evenly over k bins per frame, Gaussian-smoothed with sigma ``smooth_ms`` (k = the smallest power
+    of two whose bin is at most sigma/4). Identical to infer(..., smooth_ms=...)["rate_smooth"], for any subset: ``neurons``
+    (indices) and a time window ``start_s``..``end_s`` (seconds from the first frame; frames are padded by the kernel width
+    internally, so the values equal those of the whole recording). Memory scales with the subset. ``out_path`` writes the
+    result to a .npy file block by block and returns it memory-mapped (np.load(path, mmap_mode="r") reopens it). ``device``:
+    a torch device to smooth on (default: CPU, scipy). Returns ``rate_smooth``, ``t_smooth`` (bin centres, seconds from the
+    first frame), ``bins_per_frame`` and ``smooth_ms``."""
+    if not float(smooth_ms) > 0:
+        raise ValueError("smooth_ms must be positive")
+    R = np.atleast_2d(np.asarray(rate))
+    if neurons is not None:
+        R = R[np.atleast_1d(neurons)]
+    n, T = R.shape
+    fps = float(fps); k = _smooth_bins_per_frame(fps, float(smooth_ms))
+    f0 = 0 if start_s is None else max(0, int(np.floor(float(start_s) * fps)))
+    f1 = T if end_s is None else min(T, int(np.ceil(float(end_s) * fps)))
+    if f1 <= f0:
+        raise ValueError("empty time window")
+    pad = int(np.ceil(4.0 * float(smooth_ms) / 1000.0 * fps)) + 1            # kernel half-width in frames (+1)
+    a, b = max(0, f0 - pad), min(T, f1 + pad)
+    if out_path is not None and (a, b) == (f0, f1):                        # whole recording: straight to disk, block by block
+        from numpy.lib.format import open_memmap
+        mm = open_memmap(str(out_path), mode="w+", dtype=np.float32, shape=(n, (b - a) * k))
+        _smooth_rate(R[:, a:b], k, fps, float(smooth_ms), device=device, out=mm)
+        mm.flush(); del mm
+        res = np.load(str(out_path), mmap_mode="r")
+    else:
+        res = _smooth_rate(R[:, a:b], k, fps, float(smooth_ms), device=device)[:, (f0 - a) * k:(f1 - a) * k]
+        if out_path is not None:
+            np.save(str(out_path), res); res = np.load(str(out_path), mmap_mode="r")
+    t = (np.arange(f0 * k, f1 * k) + 0.5) / (fps * k)
+    return {"rate_smooth": res, "t_smooth": t, "bins_per_frame": k, "smooth_ms": float(smooth_ms)}
 
 
 def _infer_fast(sess, X, rows, tol, gain, rate, nu, spikes, progress=False):
@@ -265,7 +309,8 @@ def _infer_fast(sess, X, rows, tol, gain, rate, nu, spikes, progress=False):
 def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyramidal", tolerance_ms: float | None = 10.0,
           count_gain: float = 1.0, model_dir: str | Path | None = None, device: str = "auto", fine: bool = False,
           progress: bool = False, batch_windows: int = 512, bins_per_frame: int | None = None,
-          smooth_ms: float | None = SMOOTH_MS) -> dict:
+          smooth_ms: float | None = None, rate_smooth_path: str | Path | None = None,
+          max_smooth_gb: float | None = MAX_SMOOTH_GB) -> dict:
     """Infer spikes for every neuron of ``dff`` (n_neurons x n_frames, fractional dF/F at ``fps`` Hz).
 
     ``tolerance_ms`` is the spike-timing precision your analysis needs; it picks the decoder and its smoothing width
@@ -280,11 +325,15 @@ def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyrami
     frame: ``count`` (expected spikes per bin), ``prob`` and, with ``tolerance_ms``, ``spike_counts`` (decoded spikes per
     bin), each n_neurons x (n_frames * bins_per_frame). Sum-pooling keeps totals, so a stream saved at frame/16 can be
     pooled further to any coarser bin. It implies ``fine`` and runs one neuron at a time.
-    ``smooth_ms`` (default 25, the same at every frame rate) also returns ``rate_smooth``: ``rate`` in spikes/s on a grid
-    of k bins per frame (the smallest power of two whose bin is at most sigma/4; ``smooth_bins_per_frame``), each frame's
-    count spread evenly over its bins and smoothed with a Gaussian of that sigma, and ``t_smooth``, the bin centres in
-    seconds from the first frame. Frame totals equal ``rate``: a continuous rate for analyses and plots on a time axis.
-    For timing within the frame use ``spike_times``. ``None`` skips it."""
+    ``smooth_ms`` (recommended for rate analyses: 25, i.e. SMOOTH_MS, at every frame rate; default None = off) also returns
+    ``rate_smooth``: ``rate`` in spikes/s on a grid of k bins per frame (the smallest power of two whose bin is at most
+    sigma/4), each frame's count spread evenly over its bins and smoothed with a Gaussian of that sigma, and ``t_smooth``, the
+    bin centres in seconds from the first frame; ``rate`` and everything else are returned as usual. Frame totals equal
+    ``rate``. For timing within the frame use ``spike_times``. ``rate_smooth`` is computed from ``rate`` alone, so
+    smooth_rate(out["rate"], fps, ...) gives the same values later, for any neurons and time window. An in-memory
+    ``rate_smooth`` above ``max_smooth_gb`` GiB (default 2) is refused before inference starts, with the size in the message:
+    pass ``rate_smooth_path`` to write it to a .npy file block by block (returned memory-mapped), raise ``max_smooth_gb``
+    (None = no limit), or use smooth_rate() on subsets."""
     if bins_per_frame is not None:
         k = int(bins_per_frame)
         if k < 1 or k > 512 or (k & (k - 1)):
@@ -296,6 +345,14 @@ def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyrami
     if smooth_ms is not None and not float(smooth_ms) > 0:
         raise ValueError("smooth_ms must be positive, or None to skip rate_smooth")
     sk = _smooth_bins_per_frame(fps, float(smooth_ms)) if smooth_ms is not None else 0
+    if sk and rate_smooth_path is None and max_smooth_gb is not None:
+        gb = n * T * sk * 4 / 2 ** 30
+        if gb > float(max_smooth_gb):
+            raise ValueError(
+                f"rate_smooth would take {gb:.2f} GiB in memory ({n} neurons x {T} frames x {sk} bins per frame, float32), "
+                f"above max_smooth_gb={max_smooth_gb}. Pass rate_smooth_path='file.npy' to write it to disk block by block, "
+                f"raise max_smooth_gb (None = no limit), or run without smooth_ms and call setsuna.smooth_rate(out['rate'], "
+                f"fps, neurons=..., start_s=..., end_s=...) on the subsets you need (same values).")
     rate = np.full((n, T), np.nan, np.float32); nu = np.full(n, np.nan); spikes = [np.zeros(0) for _ in range(n)]
     count, prob = ([None] * n, [None] * n) if fine else (None, None)
     if not fine:
@@ -321,8 +378,8 @@ def infer(dff, fps: float, indicator: str = "jGCaMP8s", cell_type: str = "pyrami
     if tolerance_ms is not None:
         out["spike_times"] = spikes
     if sk:
-        out["rate_smooth"] = _smooth_rate(rate, sk, fps, float(smooth_ms), device=sess.s.device)
-        out["t_smooth"] = (np.arange(T * sk) + 0.5) / (float(fps) * sk)
+        r = smooth_rate(rate, fps, float(smooth_ms), out_path=rate_smooth_path, device=sess.s.device)
+        out["rate_smooth"], out["t_smooth"] = r["rate_smooth"], r["t_smooth"]
         out["smooth_ms"], out["smooth_bins_per_frame"] = float(smooth_ms), sk
     if fine and bins_per_frame is None:
         out["count"], out["prob"], out["bins_per_frame"] = count, prob, sess.s.M

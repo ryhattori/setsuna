@@ -46,9 +46,9 @@ def main(argv=None) -> int:
     r.add_argument("--no-spikes", action="store_true", help="rates only")
     r.add_argument("--bins-per-frame", type=int, default=None,
                    help="also save sub-frame streams sum-pooled to this many bins per frame (power of two, e.g. 16)")
-    r.add_argument("--smooth-ms", type=float, default=25.0,
+    r.add_argument("--smooth-ms", type=float, default=0.0,
                    help="also save rate_smooth: the rate (spikes/s) on a fine time grid, smoothed with a Gaussian of this "
-                        "sigma (ms); 0 skips it")
+                        "sigma (ms); recommended for rate analyses: 25. Above 2 GiB it goes to <out>_rate_smooth.npy")
     r.add_argument("--neuropil-coefficient", type=float, default=0.7)
     r.add_argument("--model-dir", default=None)
     r.add_argument("--device", default="auto")
@@ -81,9 +81,15 @@ def main(argv=None) -> int:
             F = _load(a.F); Fneu = _load(a.Fneu) if a.Fneu else None
         dff = setsuna.dff_from_fluorescence(F, Fneu, fps=a.fps, neuropil_coefficient=a.neuropil_coefficient)
     t0 = time.time()
+    smooth = a.smooth_ms if a.smooth_ms > 0 else None
+    big = None
+    if smooth is not None:                         # large outputs go to their own .npy, written block by block
+        from setsuna.api import MAX_SMOOTH_GB, _smooth_bins_per_frame
+        if dff.shape[0] * dff.shape[1] * _smooth_bins_per_frame(a.fps, smooth) * 4 / 2 ** 30 > MAX_SMOOTH_GB:
+            big = str(Path(a.out).with_suffix("")) + "_rate_smooth.npy"
     out = setsuna.infer(dff, a.fps, a.indicator, a.cell_type, None if a.no_spikes else a.tolerance_ms,
                         model_dir=a.model_dir, device=a.device, progress=True, bins_per_frame=a.bins_per_frame,
-                        smooth_ms=a.smooth_ms if a.smooth_ms > 0 else None)
+                        smooth_ms=smooth, rate_smooth_path=big)
     save = {"rate": out["rate"], "nu": out["nu"], "fps": a.fps, "indicator": a.indicator, "cell_type": a.cell_type,
             "band": out["band"]}
     if not a.no_spikes:
@@ -92,7 +98,11 @@ def main(argv=None) -> int:
         save["spike_time"] = np.concatenate(st) if st else np.zeros(0)
         save["tolerance_ms"] = a.tolerance_ms
     if "rate_smooth" in out:
-        save["rate_smooth"] = out["rate_smooth"].astype(np.float16)
+        if big is None:
+            save["rate_smooth"] = out["rate_smooth"].astype(np.float16)
+        else:
+            save["rate_smooth_file"] = big
+            print(f"rate_smooth ({out['rate_smooth'].shape[0]} x {out['rate_smooth'].shape[1]}, float32) -> {big}")
         save["t_smooth"], save["smooth_ms"] = out["t_smooth"], out["smooth_ms"]
     if a.bins_per_frame:
         save["bins_per_frame"] = out["bins_per_frame"]
