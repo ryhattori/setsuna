@@ -18,8 +18,8 @@ import setsuna
 dff = setsuna.dff_from_fluorescence(F, Fneu, fps=30.0)          # raw + neuropil fluorescence -> fractional dF/F
 out = setsuna.infer(dff, fps=30.0, indicator="jGCaMP8s", tolerance_ms=10)
 out["rate"]          # expected spikes per frame
-# for rate analyses, smoothing is recommended: infer(..., smooth_ms=25) adds out["rate_smooth"], the sub-frame
-# rate smoothed with a 25-ms Gaussian (spikes/s)
+# for firing-rate analyses: infer(..., smooth_ms=25) adds out["rate_smooth"], the sub-frame rate smoothed with a
+# 25-ms Gaussian (spikes/s)
 out["spike_times"]   # spike times (s), decoded at 10-ms precision
 ```
 

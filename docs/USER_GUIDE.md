@@ -132,9 +132,9 @@ or from the command line:
 
 **Rates only.** `tolerance_ms=None` (command line: `--no-spikes`) skips the spike decoder and returns `rate` and `nu`.
 
-**Smoothed rate (recommended for rate analyses).** `rate` is one value per frame, so on a time axis it is a staircase.
-For rate analyses, plots and averages, pass `smooth_ms=25` (command line: `--smooth-ms 25`): `out["rate_smooth"]` is
-then the model's sub-frame count stream (the count head's 512 bins per frame, sum-pooled to k bins per frame, the
+**Smoothed sub-frame rate (recommended for firing-rate analyses).** `rate` is one value per frame, so on a time axis
+it is a staircase. For firing-rate analyses, plots and trial averages, pass `smooth_ms=25` (command line:
+`--smooth-ms 25`): `out["rate_smooth"]` is then the model's sub-frame count stream (the count head's 512 bins per frame, sum-pooled to k bins per frame, the
 smallest power of two that makes a bin at most a quarter of the smoothing width) smoothed with a Gaussian of sigma
 `smooth_ms`, in spikes/s; `out["t_smooth"]` holds the bin centres in seconds from the first frame. `rate`, `spike_times`
 and the other outputs are returned as usual, and frame totals equal `rate`. We use 25 ms at every frame rate. The count
