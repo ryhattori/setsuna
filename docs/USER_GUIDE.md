@@ -134,11 +134,14 @@ or from the command line:
 
 **Smoothed rate (recommended for rate analyses).** `rate` is one value per frame, so on a time axis it is a staircase.
 For rate analyses, plots and averages, pass `smooth_ms=25` (command line: `--smooth-ms 25`): `out["rate_smooth"]` is
-then `rate` in spikes/s on a grid finer than the frame (k bins per frame, the smallest power of two whose bin is at most
-a quarter of the smoothing width; `out["t_smooth"]` holds the bin centres in seconds from the first frame), each frame's
-count spread evenly over its bins and smoothed with a Gaussian of sigma `smooth_ms`. `rate` and the other outputs are
-returned as usual, and frame totals equal `rate`. Smoothing is off by default only because the smoothed array is
-8-16 times larger than `rate`. We use 25 ms at every frame rate. At low frame rates it follows the frames' steps;
+then the per-frame `rate` redrawn as a smooth curve in spikes/s. Each frame's count is spread evenly over k bins (the
+smallest power of two that makes a bin at most a quarter of the smoothing width, so the curve is sampled finely
+enough) and smoothed with a Gaussian of sigma `smooth_ms`; `out["t_smooth"]` holds the bin centres in seconds from the
+first frame. It is made from the per-frame `rate`, not from a sub-frame stream, so it carries no timing within the
+frame (use `spike_times` for that). `rate` and the other outputs are returned as usual, and frame totals equal `rate`.
+We use 25 ms at every frame rate. Smoothing is off by default only because of size: the grid is about 160-320 samples
+per second per neuron at any frame rate, so `rate_smooth` is k times larger than `rate` (k = 8 at 30 Hz, 16 at 10 Hz,
+128 at 2 Hz). At low frame rates it follows the frames' steps;
 use a larger `smooth_ms` for a smoother curve, and `spike_times` for timing within the frame. In particular, for
 the onset or latency of a response at low frame rates, average spike times across trials rather than `rate_smooth`:
 the rate spreads each frame's spikes over the whole frame, so its rise starts early by up to a frame. 
