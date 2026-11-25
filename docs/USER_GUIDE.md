@@ -5,8 +5,14 @@ design serves frame rates from 1 to 120 Hz and the noise levels of real experime
 cell types, including those without ground truth in training; it is told the frame rate, the noise level, the indicator
 and the cell type of each recording, and returns
 
-* a **rate**: the expected number of spikes in every frame (or in every 1/512 of a frame), and
+* a **rate**: the expected number of spikes in every frame (or in every 1/512 of a frame), optionally smoothed on a
+  time grid finer than the frame, and
 * **spike times**, decoded at the timing precision your analysis needs.
+
+Which to use: for **firing-rate analyses** (tuning, correlations, trial-averaged responses) use the smoothed sub-frame
+rate (`smooth_ms=25`, section 5); for **timing analyses** (when spikes occur, response onsets and latencies, synchrony
+between neurons, timing within the frame) use the **spike times**, with the tolerance set to the precision the analysis
+needs (section 7).
 
 ## 1. Install
 
