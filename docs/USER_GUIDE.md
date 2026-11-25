@@ -134,31 +134,28 @@ or from the command line:
 
 **Smoothed rate (recommended for rate analyses).** `rate` is one value per frame, so on a time axis it is a staircase.
 For rate analyses, plots and averages, pass `smooth_ms=25` (command line: `--smooth-ms 25`): `out["rate_smooth"]` is
-then the per-frame `rate` redrawn as a smooth curve in spikes/s. Each frame's count is spread evenly over k bins (the
-smallest power of two that makes a bin at most a quarter of the smoothing width, so the curve is sampled finely
-enough) and smoothed with a Gaussian of sigma `smooth_ms`; `out["t_smooth"]` holds the bin centres in seconds from the
-first frame. It is made from the per-frame `rate`, not from a sub-frame stream, so it carries no timing within the
-frame (use `spike_times` for that). `rate` and the other outputs are returned as usual, and frame totals equal `rate`.
-We use 25 ms at every frame rate. Smoothing is off by default only because of size: the grid is about 160-320 samples
-per second per neuron at any frame rate, so `rate_smooth` is k times larger than `rate` (k = 8 at 30 Hz, 16 at 10 Hz,
-128 at 2 Hz). At low frame rates it follows the frames' steps;
-use a larger `smooth_ms` for a smoother curve, and `spike_times` for timing within the frame. In particular, for
-the onset or latency of a response at low frame rates, average spike times across trials rather than `rate_smooth`:
-the rate spreads each frame's spikes over the whole frame, so its rise starts early by up to a frame. 
+then the model's sub-frame count stream (the count head's 512 bins per frame, sum-pooled to k bins per frame, the
+smallest power of two that makes a bin at most a quarter of the smoothing width) smoothed with a Gaussian of sigma
+`smooth_ms`, in spikes/s; `out["t_smooth"]` holds the bin centres in seconds from the first frame. `rate`, `spike_times`
+and the other outputs are returned as usual, and frame totals equal `rate`. We use 25 ms at every frame rate. The count
+stream is nearly flat within each frame, so for the timing of single spikes use `spike_times`. In particular, for the
+onset or latency of a response at low frame rates, average spike times across trials rather than `rate_smooth`, whose
+rise starts early by up to a frame. (With smoothing on, `rate` at 10 Hz and below can differ from a run without it in
+the last float32 digit, because the pooled GPU path sums in another order; spike times are identical.)
 
-`rate_smooth` is computed from `rate` alone, so it can also be made afterwards, for any neurons and time window, with
-the same values and memory in proportion to what you ask for:
+Smoothing is off by default only because of size: the grid is about 160-320 samples per second per neuron at any frame
+rate, so `rate_smooth` is k times larger than `rate` (k = 8 at 30 Hz, 16 at 10 Hz, 128 at 2 Hz); an hour of 10,000
+neurons is about 35 GB. `infer` therefore refuses an in-memory `rate_smooth` above 2 GB before it starts and says how
+large it would be. Pass `rate_smooth_path="rate_smooth.npy"` to write it to disk (filled during inference and smoothed
+there block by block, so any machine with the disk space can do it; returned memory-mapped), or raise the limit with
+`max_smooth_gb`. On the command line, a `rate_smooth` above 2 GB goes to `<out>_rate_smooth.npy` automatically.
+`setsuna.smooth_rate` smooths a sub-frame count stream you already have, for any neurons and time window:
 
 ```python
-r = setsuna.smooth_rate(out["rate"], fps=30.0, smooth_ms=25, neurons=[0, 5], start_s=60, end_s=120)
+out = setsuna.infer(dff, fps=30.0, bins_per_frame=16)
+r = setsuna.smooth_rate(out["count"], fps=30.0, bins_per_frame=16, smooth_ms=25, neurons=[0, 5], start_s=60, end_s=120)
 r["rate_smooth"], r["t_smooth"]
 ```
-
-It takes about 4 bytes x 200-400 samples per second per neuron, so for very large runs (an hour of 10,000 neurons is
-about 35 GB) `infer` refuses an in-memory `rate_smooth` above 2 GB before it starts and says how large it would be.
-Pass `rate_smooth_path="rate_smooth.npy"` to write it to disk block by block (returned memory-mapped; any machine with
-the disk space can do it), raise the limit with `max_smooth_gb`, or use `smooth_rate` on the parts you need. On the
-command line, a `rate_smooth` above 2 GB goes to `<out>_rate_smooth.npy` automatically.
 
 **Sub-frame streams.** `bins_per_frame=16` (command line: `--bins-per-frame 16`) also returns the count stream
 (`count`, expected spikes per bin), the within-frame stream (`prob`) and, with a tolerance, the decoded spikes per bin
