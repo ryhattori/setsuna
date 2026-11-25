@@ -52,7 +52,7 @@ SETSUNA and its other dependencies about 30 s).
 
 ## 2. Get the models
 
-The trained models are published as an archive of a release of this repository (release v0.9.0 for version 0.9.0 of
+The trained models are published as an archive of a release of this repository (release v0.9.0, used by versions 0.9.x of
 the package, about 64 MB). They are downloaded automatically the first time you run SETSUNA. To install them
 beforehand, for example on a cluster node without internet access, run
 
@@ -78,13 +78,14 @@ with `dff_from_fluorescence`, infers spikes at a 25-ms tolerance and compares th
     cd examples
     jupyter notebook demo.ipynb      # or: python demo.py (GPU if available), python demo.py --cpu
 
-Expected output (version 0.9.0):
+Expected output (version 0.9.1):
 
     recording        : 170 s at 30.5 Hz, 127 recorded spikes
     SETSUNA rate     : 121.4 expected spikes in total (sum of out['rate'])
     SETSUNA spikes   : 121 inferred spike times (tolerance 25 ms)
     within +- 25 ms  : 95 of 127 recorded spikes matched (75%)
     within +-100 ms  : 105 of 127 recorded spikes matched (83%)
+    smoothed rate    : correlation 0.947 with the recorded spikes (both 25-ms Gaussian)
     run time         : ...
 
 It runs in about 5 s on a GPU or a CPU, including loading the models (the models are downloaded first if they are not
